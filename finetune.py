@@ -4,18 +4,21 @@ import pickle
 import sys
 import types
 from pathlib import Path
+from tqdm import tqdm
 
 import torch
+from torch import nn
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import LambdaLR
+from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from huggingface_hub import hf_hub_download
 from moshi.models import loaders
-from torch import nn
-from torch.optim.lr_scheduler import LambdaLR
-from tqdm import tqdm
-from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
-
 import wandb
-from aladdin.tts.sesame_finetune.dataloaders import create_dataloaders
+
+from csm.generator import Generator, load_llama3_tokenizer, load_watermarker
+from csm.models import Model, _create_causal_mask
+
+from dataloaders import create_dataloaders
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--tokenized_data", type=str, required=True, help="Path to the pre-tokenized data")

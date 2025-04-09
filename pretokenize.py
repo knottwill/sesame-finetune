@@ -2,7 +2,7 @@
 Script to pre-tokenize the training and validation data for the sesame finetune (fastest on a GPU).
 
 Usage:
-python tokenize.py --train_data /path/to/train/metadata.json --val_data /path/to/val/metadata.json --output /path/to/output/tokens.pkl --csm_path /path/to/csm/repo
+python pretokenize.py --train_data /path/to/train/metadata.json --val_data /path/to/val/metadata.json --output /path/to/output/tokens.pkl --csm_path /path/to/csm/repo
 """
 
 import argparse
@@ -20,24 +20,14 @@ from torch import nn
 from tqdm import tqdm
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 
+from csm.generator import load_llama3_tokenizer
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--train_data", type=Path, help="Path to the training metadata", required=True)
 parser.add_argument("--val_data", type=Path, help="Path to the validation metadata", required=True)
 parser.add_argument("--output", type=str, help="Path to save the computed tokens", required=True)
 parser.add_argument("--csm_path", type=str, help="Path to the sesame csm repo", default=str(Path.home() / "csm"))
 args = parser.parse_args()
-
-
-# imports from official sesame csm repo
-try:
-    import sys
-
-    sys.path.append(args.csm_path)
-    from generator import load_llama3_tokenizer
-except ImportError:
-    raise ImportError(
-        "Please clone https://github.com/SesameAILabs/csm.git to use this script and then specify the --csm_path flag"
-    )
 
 
 def load_metadata(data_path: Path):
