@@ -10,19 +10,7 @@ git clone $CSM_REPO $TEMP_DIR
 cd $TEMP_DIR
 git checkout $CSM_COMMIT
 
-# Create setup.py to install CSM
-cat > setup.py << EOL
-from setuptools import setup, find_packages
-
-setup(
-    name="csm",
-    version="0.1",
-    packages=find_packages(),
-    install_requires=open('requirements.txt').read().splitlines(),
-)
-EOL
-
-# Install CSM and additional dependencies
+# Install CSM and dependencies
 pip install -e .
 pip install wandb==0.19.6 pandas tqdm
 

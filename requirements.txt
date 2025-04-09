@@ -1,0 +1,4 @@
+csm @ git+https://github.com/SesameAILabs/csm.git@2d720827843b653c4d67bb4445b1c0a4f59e646f
+wandb==0.19.6
+pandas
+tqdm 

@@ -2,7 +2,7 @@
 Script to pre-tokenize the training and validation data for the sesame finetune (fastest on a GPU).
 
 Usage:
-python pretokenize.py --train_data /path/to/train/metadata.json --val_data /path/to/val/metadata.json --output /path/to/output/tokens.pkl --csm_path /path/to/csm/repo
+python pretokenize.py --train_data /path/to/train/metadata.json --val_data /path/to/val/metadata.json --output /path/to/output/tokens.pkl
 """
 
 import argparse
@@ -25,9 +25,9 @@ from csm.generator import load_llama3_tokenizer
 parser = argparse.ArgumentParser()
 parser.add_argument("--train_data", type=Path, help="Path to the training metadata", required=True)
 parser.add_argument("--val_data", type=Path, help="Path to the validation metadata", required=True)
-parser.add_argument("--output", type=str, help="Path to save the computed tokens", required=True)
-parser.add_argument("--csm_path", type=str, help="Path to the sesame csm repo", default=str(Path.home() / "csm"))
+parser.add_argument("--output", type=Path, default="./data/tokens.pkl", help="Path to save the computed tokens", required=True)
 args = parser.parse_args()
+args.output.parent.mkdir(parents=True, exist_ok=True)
 
 
 def load_metadata(data_path: Path):

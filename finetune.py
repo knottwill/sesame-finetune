@@ -50,18 +50,6 @@ parser.add_argument(
 parser.add_argument("--gen_speaker", type=int, default=999, help="Speaker id for model to generate")
 args = parser.parse_args()
 
-# imports from official sesame csm repo
-try:
-    import sys
-
-    sys.path.append(args.csm_path)
-    from generator import Generator, load_llama3_tokenizer, load_watermarker
-    from models import Model, _create_causal_mask
-except ImportError:
-    raise ImportError(
-        "Please clone https://github.com/SesameAILabs/csm.git to use this script and then specify the --csm_path flag"
-    )
-
 
 def forward(self, tokens: torch.Tensor, tokens_mask: torch.Tensor):
     """
