@@ -10,6 +10,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR
+from torch.amp import GradScaler, autocast
+from torch.nn.utils import clip_grad_norm_
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from huggingface_hub import hf_hub_download
 from moshi.models import loaders
@@ -29,15 +31,21 @@ parser.add_argument(
     default="sesame/csm-1b",
     help="Option to specify local path if you have already downloaded the model",
 )
+
 parser.add_argument("--wandb_api_key", type=str, required=True)
 parser.add_argument("--wandb_project", type=str, default="csm-finetuning", help="Name of the project")
 parser.add_argument("--wandb_name", type=str, default=None, help="Name of the run")
 parser.add_argument("--wandb_reinit", type=bool, default=True, help="Whether to reinitialize the run")
+
 parser.add_argument("--batch_size", type=int, default=32)
 parser.add_argument("--learning_rate", type=float, default=1e-5)
 parser.add_argument("--weight_decay", type=float, default=0.01)
 parser.add_argument("--total_steps", type=int, default=5000)
 parser.add_argument("--warmup_steps", type=int, default=500)
+parser.add_argument("--use_amp", type=bool, default=True, help="Use Automatic Mixed Precision Training")
+parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Maximum gradient norm")
+parser.add_argument("--grad_acc_steps", type=int, default=1, help="Number of gradient accumulation steps")
+
 parser.add_argument("--log_every", type=int, default=10)
 parser.add_argument("--val_every", type=int, default=100)
 parser.add_argument("--gen_every", type=int, default=100)
@@ -177,6 +185,7 @@ if __name__ == "__main__":
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=wandb.config["learning_rate"])
     scheduler = LambdaLR(optimizer, lr_lambda, last_epoch=-1)
+    scaler = GradScaler(enabled=args.use_amp)
 
     # Create a progress bar for all steps
     pbar = tqdm(total=wandb.config["total_steps"], desc="Training")
@@ -187,11 +196,19 @@ if __name__ == "__main__":
         epoch += tokens.size(0) / len(trainloader)
         tokens, tokens_mask = tokens.to(device), tokens_mask.to(device)
 
-        loss = model(tokens, tokens_mask)
-        loss.backward()
-        optimizer.step()
-        scheduler.step()
-        optimizer.zero_grad()
+        with autocast(device_type=device, dtype=torch.float16, enabled=args.use_amp):
+            loss = model(tokens, tokens_mask)
+            loss = loss / args.grad_acc_steps
+
+        scaler.scale(loss).backward()
+
+        if (step + 1) % args.grad_acc_steps == 0:
+            scaler.unscale_(optimizer)
+            clip_grad_norm_(model.parameters(), args.max_grad_norm)
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+            scheduler.step()
 
         train_loss = loss.item()
         train_losses.append(train_loss)
@@ -210,7 +227,7 @@ if __name__ == "__main__":
         if step % wandb.config["val_every"] == 0:
             model.eval()
             val_loss = 0
-            with torch.no_grad():
+            with torch.no_grad(), autocast(device_type=device, dtype=torch.float16, enabled=args.use_amp):
                 for val_tokens, val_tokens_mask in valloader:
                     val_tokens, val_tokens_mask = val_tokens.to(device), val_tokens_mask.to(device)
                     val_loss += model(val_tokens, val_tokens_mask).item()
@@ -233,12 +250,13 @@ if __name__ == "__main__":
             model.eval()
             Generator.__init__ = types.MethodType(custom_generator_init, Generator)
             generator = Generator(model, audio_tokenizer, text_tokenizer)
-            audio = generator.generate(
-                text=wandb.config["gen_sentence"],
-                speaker=args.gen_speaker,
-                context=[],
-                max_audio_length_ms=10_000,
-            )
+            with torch.no_grad(), autocast(device_type=device, dtype=torch.float16, enabled=args.use_amp):
+                audio = generator.generate(
+                    text=wandb.config["gen_sentence"],
+                    speaker=args.gen_speaker,
+                    context=[],
+                    max_audio_length_ms=10_000,
+                )
 
             wandb.log(
                 {
