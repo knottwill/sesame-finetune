@@ -45,10 +45,10 @@ def parse_args(arg_string=None):
     parser.add_argument("--save_every", type=int, default=1000)
     parser.add_argument("--gen_every", type=int, default=1000)
     parser.add_argument(
-        "--gen_sentence",
+        "--gen_sentences",
         type=str,
         default="Bird law in this country is not governed by reason.",
-        help="Sentence for model to generate (should be the same language as the tokenized data)",
+        help="Sentence(s) for model to generate. If a path is provided, the model will generate from the sentences in the file.",
     )
     parser.add_argument("--gen_speaker", type=int, default=999, help="Speaker id for model to generate")
 
@@ -58,6 +58,7 @@ def parse_args(arg_string=None):
     args = parser.parse_args(arg_string.split() if arg_string else None)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    args.gen_sentences = Path(args.gen_sentences) if args.gen_sentences.endswith(".txt") else args.gen_sentences
     
     return args
 
@@ -169,23 +170,31 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
                 )
             
             if args.gen_every and step % args.gen_every == 0:
-                audio, wer = generate_audio(
-                    model,
-                    audio_tokenizer,
-                    text_tokenizer,
-                    args.gen_sentence,
-                    args.gen_speaker,
-                    device,
-                    use_amp=args.use_amp
-                )
-                
-                wandb.log(
-                    {
-                        "audio": wandb.Audio(audio, sample_rate=24_000),
-                        "wer": wer,
-                    },
-                    step=step,
-                )
+                gen_sentences = []
+                if isinstance(args.gen_sentences, str):
+                    gen_sentences.append(args.gen_sentences)
+                elif isinstance(args.gen_sentences, Path):
+                    with open(args.gen_sentences, "r") as f:
+                        gen_sentences = f.readlines()
+
+                for i, sentence in enumerate(gen_sentences):
+                    audio, wer = generate_audio(
+                        model,
+                        audio_tokenizer,
+                        text_tokenizer,
+                        sentence,
+                        args.gen_speaker,
+                        device,
+                        use_amp=args.use_amp
+                    )
+                    
+                    wandb.log(
+                        {
+                            f"audio_{i}": wandb.Audio(audio, sample_rate=24_000),
+                            f"wer_{i}": wer,
+                        },
+                        step=step,
+                    )
                 model.train()
             
             pbar.update(1)

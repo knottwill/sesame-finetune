@@ -30,7 +30,7 @@ def parse_args(arg_string=None):
     parser.add_argument("--val_every", type=int, default=500, help="Number of steps between validation runs")
     parser.add_argument("--gen_every", type=int, default=0, help="Number of steps between generation runs")
     parser.add_argument("--save_every", type=int, default=0, help="Number of steps between saving the model")
-    parser.add_argument("--log_every", type=int, default=0, help="Number of steps between logging the training loss")
+    parser.add_argument("--log_every", type=int, default=10, help="Number of steps between logging the training loss")
 
     # Parameters for generation during evaluation
     parser.add_argument(
