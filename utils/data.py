@@ -3,7 +3,6 @@ import numpy as np
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data.sampler import Sampler
 
 
 class TokenizedDataset(torch.utils.data.Dataset):
@@ -26,10 +25,7 @@ class TokenizedDataset(torch.utils.data.Dataset):
 
 
 def collate_fn(batch: List[dict]):
-    """Collate function for the TokenizedDataset
-
-    TODO: describe what's going on here and add shapes of tokens, tokens_mask
-    """
+    """Collate function for the TokenizedDataset"""
     tokens, tokens_mask = [], []
     n_codebooks = 32
     for item in batch:
@@ -60,12 +56,8 @@ def collate_fn(batch: List[dict]):
     return tokens, tokens_mask
 
 
-class CSMSampler(Sampler):
-    """
-    Sampler that groups samples of similar lengths to minimize padding in batches.
-
-    TODO: Brush this up and descibe it properly
-    """
+class CSMSampler(torch.utils.data.sampler.Sampler):
+    """Sampler that groups samples of similar lengths to minimize padding in batches."""
 
     def __init__(
         self, lengths: List[int], batch_size: int, shuffle: bool = True, is_infinite: bool = True, random_seed: int = 42
