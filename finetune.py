@@ -13,14 +13,14 @@ from torch.amp import GradScaler, autocast
 from torch.nn.utils import clip_grad_norm_
 import wandb
 
-from utils import (
+from utils.training import (
     load_model, 
     load_tokenizers, 
     generate_audio, 
     WarmupDecayLR,
     validate
 )
-from dataloaders import create_dataloaders
+from utils.data import create_dataloaders
 
 
 def parse_args(arg_string=None):
