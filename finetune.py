@@ -105,7 +105,7 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
     
     # Create progress bar
     desc = "Training" if trial is None else f"Trial {trial.number}"
-    pbar = tqdm(total=config["total_steps"], desc="Training")
+    pbar = tqdm(total=config["total_steps"], desc=desc)
     
     # Training loop
     epoch = 0

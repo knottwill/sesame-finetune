@@ -17,6 +17,7 @@ def parse_args(arg_string=None):
     parser.add_argument("--data", default="./data/tokens.pkl", type=str, help="Path to the pre-tokenized data")
     parser.add_argument("--output_dir", type=Path, default="./exp", help="Path to save the model")
     parser.add_argument("--model", type=str, default="sesame/csm-1b", help="Option to specify local path")
+    parser.add_argument("--sweep_config", type=str, default="./configs/sweep.yaml", help="Path to the sweep config")
     parser.add_argument("--wandb_api_key", type=str, required=True)
     parser.add_argument("--wandb_project", type=str, default="csm-sweep", help="Name of the project")
     parser.add_argument("--study_name", type=str, default="csm-sweep", help="Name of the study")
@@ -68,18 +69,20 @@ def worker(args, gpu_id, study_name, storage_name, all_tokens):
         if args.trials_per_gpu > 1:
             memory_fraction = 0.9 / args.trials_per_gpu
             torch.cuda.set_per_process_memory_fraction(memory_fraction)
-        
-        config = {
-            "batch_size": trial.suggest_categorical("batch_size", [8, 16, 32]),
-            "learning_rate": trial.suggest_float("learning_rate", 1e-6, 1e-2, log=True),
-            "lr_decay": trial.suggest_categorical("lr_decay", ["linear", "cosine", "constant", "exponential"]),
-            "weight_decay": trial.suggest_float("weight_decay", 1e-3, 1e-1, log=True),
-            "warmup_steps": trial.suggest_int("warmup_steps", 100, 1000),
-            "max_grad_norm": trial.suggest_float("max_grad_norm", 0.5, 5.0),
-            "grad_acc_steps": 1,
-            "use_amp": args.use_amp,
-            "gen_sentence": args.gen_sentence,
-        }
+
+        with open(args.sweep_config, "r") as f:
+            sweep_config = yaml.safe_load(f)
+
+        for param in sweep_config["parameters"]:
+            if param["type"] == "categorical":
+                config[param["name"]] = trial.suggest_categorical(param["name"], param["values"])
+            elif param["type"] == "float":
+                config[param["name"]] = trial.suggest_float(param["name"], param["min"], param["max"], log=param["log"])
+            elif param["type"] == "int":
+                config[param["name"]] = trial.suggest_int(param["name"], param["min"], param["max"])
+
+        config['grad_acc_steps'] = 1
+        config['use_amp'] = args.use_amp
         
         wandb.init(
             project=args.wandb_project,
