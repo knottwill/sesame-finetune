@@ -7,6 +7,8 @@ from huggingface_hub import hf_hub_download
 from moshi.models import loaders
 from pathlib import Path
 from typing import Union
+from functools import partial
+from torch.optim.lr_scheduler import LambdaLR
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/csm")
@@ -14,6 +16,32 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/
 from csm.generator import Generator, load_llama3_tokenizer, load_watermarker
 from csm.models import Model, _create_causal_mask
 
+
+class WarmupDecayLR(LambdaLR):
+    """
+    Learning rate scheduler with a linear warmup and specificable decay.
+    """
+    def __init__(self, optimizer, warmup_steps: int, total_steps: int, decay_type: str = "linear"):
+        self.warmup_steps = warmup_steps
+        self.total_steps = total_steps
+        self.decay_type = decay_type
+        super().__init__(optimizer, self.lr_lambda, last_epoch=-1)
+
+    def lr_lambda(self, step: int) -> float:
+        if step < self.warmup_steps:
+            return step / self.warmup_steps
+        else:
+            if self.decay_type == "linear":
+                return (self.total_steps - step) / (self.total_steps - self.warmup_steps)
+            elif self.decay_type == "constant":
+                return 1.0
+            elif self.decay_type == "exponential":
+                return 0.1 ** ((step - self.warmup_steps) / (self.total_steps - self.warmup_steps))
+            elif self.decay_type == "cosine":
+                return 0.5 * (1 + torch.cos(torch.pi * (step - self.warmup_steps) / (self.total_steps - self.warmup_steps)))
+            else:
+                raise ValueError(f"Invalid decay type: {self.decay_type}")
+            
 
 def load_tokenizers(device: Union[str, torch.device]):
     """Load text and audio tokenizers."""
@@ -24,23 +52,6 @@ def load_tokenizers(device: Union[str, torch.device]):
     audio_tokenizer = mimi
     
     return text_tokenizer, audio_tokenizer
-
-
-def lr_lambda(step: int, warmup_steps: int, total_steps: int, decay_type: str = "linear") -> float:
-    """Returns lambda for the learning rate scheduler for a linear warmup and specificable decay."""
-    if step < warmup_steps:
-        return step / warmup_steps
-    else:
-        if decay_type == "linear":
-            return (total_steps - step) / (total_steps - warmup_steps)
-        elif decay_type == "constant":
-            return 1.0
-        elif decay_type == "exponential":
-            return 0.1 ** ((step - warmup_steps) / (total_steps - warmup_steps))
-        elif decay_type == "cosine":
-            return 0.5 * (1 + torch.cos(torch.pi * (step - warmup_steps) / (total_steps - warmup_steps)))
-        else:
-            raise ValueError(f"Invalid decay type: {decay_type}")
 
 
 def forward(self, tokens: torch.Tensor, tokens_mask: torch.Tensor):

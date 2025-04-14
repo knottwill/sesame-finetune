@@ -6,3 +6,4 @@ total_steps: 10000
 use_amp: true
 warmup_steps: 1000
 weight_decay: 0.001
+lr_decay: linear

@@ -1,6 +1,5 @@
 import argparse
 import os
-import sys
 import pickle
 from pathlib import Path
 import yaml
@@ -9,18 +8,9 @@ from optuna.visualization import plot_optimization_history, plot_param_importanc
 import plotly
 import wandb
 import torch
-from torch.amp import autocast
-from tqdm import tqdm
 import torch.multiprocessing as mp
 
-from utils import (
-    load_model,
-    load_tokenizers,
-    generate_audio,
-    lr_lambda,
-    validate
-)
-from dataloaders import create_dataloaders
+from finetune import finetune
 
 def parse_args(arg_string=None):   
     parser = argparse.ArgumentParser()
@@ -29,13 +19,17 @@ def parse_args(arg_string=None):
     parser.add_argument("--model", type=str, default="sesame/csm-1b", help="Option to specify local path")
     parser.add_argument("--wandb_api_key", type=str, required=True)
     parser.add_argument("--wandb_project", type=str, default="csm-sweep", help="Name of the project")
+    parser.add_argument("--study_name", type=str, default="csm-sweep", help="Name of the study")
     parser.add_argument("--n_epochs", type=int, default=1, help="Number of epochs to train before evaluating")
     parser.add_argument("--n_trials", type=int, default=20, help="Number of Optuna trials")
     parser.add_argument("--device", type=str, default=None, help="Device to use (defaults to CUDA if available)")
     parser.add_argument("--use_amp", type=bool, default=True, help="Use Automatic Mixed Precision Training")
     parser.add_argument("--n_gpus", type=int, default=2, help="Number of GPUs to use")
     parser.add_argument("--trials_per_gpu", type=int, default=1, help="Number of trials to run per GPU")
-    parser.add_argument("--val_every", type=int, default=100, help="Number of steps between validation runs")
+    parser.add_argument("--val_every", type=int, default=500, help="Number of steps between validation runs")
+    parser.add_argument("--gen_every", type=int, default=0, help="Number of steps between generation runs")
+    parser.add_argument("--save_every", type=int, default=0, help="Number of steps between saving the model")
+    parser.add_argument("--log_every", type=int, default=0, help="Number of steps between logging the training loss")
 
     # Parameters for generation during evaluation
     parser.add_argument(
@@ -46,142 +40,12 @@ def parse_args(arg_string=None):
     )
     parser.add_argument("--gen_speaker", type=int, default=999, help="Speaker id for model to generate")
 
-    return parser.parse_args(arg_string.split() if arg_string else None)
+    args = parser.parse_args(arg_string.split() if arg_string else None)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    return args
 
 
-args = parse_args()
-
-
-# The train_and_evaluate function needs to be modified to accept GPU ID
-def train_and_evaluate(trial, all_tokens, gpu_id):
-    """
-    Train the model with trial-specific hyperparameters and return validation loss.
-    """
-    # Set the GPU for this process
-    torch.cuda.set_device(gpu_id)
-    
-    # Limit GPU memory usage to allow multiple trials per GPU
-    if args.trials_per_gpu > 1:
-        memory_fraction = 0.9 / args.trials_per_gpu
-        torch.cuda.set_per_process_memory_fraction(memory_fraction)
-    
-    # Configure hyperparameters for this trial
-    config = {
-        "batch_size": trial.suggest_categorical("batch_size", [8, 16, 32]),
-        "learning_rate": trial.suggest_float("learning_rate", 1e-6, 1e-2, log=True),
-        "weight_decay": trial.suggest_float("weight_decay", 1e-3, 1e-1, log=True),
-        "warmup_steps": trial.suggest_int("warmup_steps", 100, 1000),
-        "max_grad_norm": trial.suggest_float("max_grad_norm", 0.5, 5.0),
-        "grad_acc_steps": 1,
-        "use_amp": args.use_amp,
-        "gen_sentence": args.gen_sentence,
-    }
-    
-    # Create a unique run name for this trial including GPU ID
-    run_name = f"trial-{trial.number}-gpu-{gpu_id}"
-    
-    # Initialize wandb for this trial
-    wandb.init(
-        project=args.wandb_project,
-        name=run_name,
-        config=config,
-        group="optuna_sweep",
-        dir=args.output_dir / "wandb",
-        reinit=True,
-    )
-    
-    device = torch.device(f"cuda:{gpu_id}")
-    model = load_model(args.model, device)
-    
-    text_tokenizer, audio_tokenizer = load_tokenizers(device)
-    
-    trainloader, valloader, _ = create_dataloaders(all_tokens, config["batch_size"], infinite_train=False)
-    
-    optimizer = torch.optim.AdamW(
-        model.parameters(), 
-        lr=config["learning_rate"],
-        weight_decay=config["weight_decay"]
-    )
-    
-    total_steps = len(trainloader) * args.n_epochs
-    config["total_steps"] = total_steps
-    
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, 
-        lambda step: lr_lambda(step, config["warmup_steps"], total_steps)
-    )
-    
-    model.train()
-    pbar = tqdm(total=total_steps, desc=f"Trial {trial.number} GPU {gpu_id}")
-    step = 0
-    
-    for epoch in range(args.n_epochs):
-        for tokens, tokens_mask in trainloader:
-            tokens, tokens_mask = tokens.to(device), tokens_mask.to(device)
-            
-            with autocast(device_type=str(device), enabled=args.use_amp):
-                loss = model(tokens, tokens_mask)
-                loss = loss / config["grad_acc_steps"]
-            
-            loss.backward()
-            
-            if (step + 1) % config["grad_acc_steps"] == 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), config["max_grad_norm"])
-                optimizer.step()
-                scheduler.step()
-                optimizer.zero_grad()
-            
-            train_loss = loss.item()
-            wandb.log({"train_loss": train_loss, "learning_rate": optimizer.param_groups[0]["lr"]}, step=step)
-            pbar.update(1)
-            pbar.set_postfix({"loss": f"{train_loss:.4f}", "lr": f"{optimizer.param_groups[0]['lr']:.6f}"})
-            
-            step += 1
-            
-            # Run validation and pruning every val_every steps
-            if step % args.val_every == 0:
-                val_loss = validate(model, valloader, device, args.use_amp)
-                wandb.log({"val_loss": val_loss}, step=step)
-                
-                # Report to Optuna for pruning
-                trial.report(val_loss, step)
-                if trial.should_prune():
-                    wandb.finish()
-                    pbar.close()
-                    raise optuna.exceptions.TrialPruned()
-                    
-                model.train()
-    
-    # Final evaluation  
-    val_loss = validate(model, valloader, device, args.use_amp)
-    wandb.log({"final_val_loss": val_loss})
-    
-    try:
-        audio = generate_audio(
-            model,
-            audio_tokenizer,
-            text_tokenizer,
-            config["gen_sentence"],
-            args.gen_speaker,
-            device, 
-            use_amp=args.use_amp,
-            max_audio_length_ms=5_000,  # Shorter for sweep
-        )
-        
-        wandb.log({"audio": wandb.Audio(audio.squeeze(0).cpu().numpy(), sample_rate=24_000)})
-    except Exception as e:
-        print(f"Audio generation failed: {e}")
-    
-    wandb.finish()
-    pbar.close()
-    
-    model_path = args.output_dir / f"model_trial_{trial.number}_gpu_{gpu_id}.pt"
-    torch.save(model.state_dict(), model_path)
-
-    return val_loss
-
-
-def worker(gpu_id, study_name, storage_name, all_tokens):
+def worker(args, gpu_id, study_name, storage_name, all_tokens):
     """
     Worker function for each GPU to run multiple trials.
     """
@@ -195,9 +59,40 @@ def worker(gpu_id, study_name, storage_name, all_tokens):
         study_name=study_name,
         storage=storage_name
     )
+
+    device = torch.device(f"cuda:{gpu_id}")
     
     def objective(trial):
-        return train_and_evaluate(trial, all_tokens, gpu_id)
+        torch.cuda.set_device(gpu_id)
+        
+        if args.trials_per_gpu > 1:
+            memory_fraction = 0.9 / args.trials_per_gpu
+            torch.cuda.set_per_process_memory_fraction(memory_fraction)
+        
+        config = {
+            "batch_size": trial.suggest_categorical("batch_size", [8, 16, 32]),
+            "learning_rate": trial.suggest_float("learning_rate", 1e-6, 1e-2, log=True),
+            "lr_decay": trial.suggest_categorical("lr_decay", ["linear", "cosine", "constant", "exponential"]),
+            "weight_decay": trial.suggest_float("weight_decay", 1e-3, 1e-1, log=True),
+            "warmup_steps": trial.suggest_int("warmup_steps", 100, 1000),
+            "max_grad_norm": trial.suggest_float("max_grad_norm", 0.5, 5.0),
+            "grad_acc_steps": 1,
+            "use_amp": args.use_amp,
+            "gen_sentence": args.gen_sentence,
+        }
+        
+        wandb.init(
+            project=args.wandb_project,
+            name=f"trial-{trial.number}-gpu-{gpu_id}",
+            config=config,
+            group="optuna_sweep",
+            dir=args.output_dir / "wandb",
+            reinit=True,
+        )
+
+        final_val_loss = finetune(args, config, device, all_tokens, trial)
+        wandb.finish()
+        return final_val_loss
     
     study.optimize(objective, n_trials=trials_per_worker)
 
@@ -227,17 +122,17 @@ def save_visualization(study):
 if __name__ == "__main__":
     assert torch.cuda.is_available(), "CUDA is not available"
     mp.set_start_method('spawn')
+    args = parse_args()
     os.environ["WANDB_API_KEY"] = args.wandb_api_key
     os.makedirs(args.output_dir, exist_ok=True)
     
     with open(args.data, "rb") as f:
         all_tokens = pickle.load(f)
     
-    study_name = f"csm-sweep-{args.n_epochs}epochs"
     storage_name = f"sqlite:///{args.output_dir}/optuna.db"
 
     study = optuna.create_study(
-        study_name=study_name,
+        study_name=args.study_name,
         storage=storage_name,
         direction="minimize",
         load_if_exists=True,
@@ -251,7 +146,7 @@ if __name__ == "__main__":
         gpu_id = i % args.n_gpus
         p = mp.Process(
             target=worker,
-            args=(gpu_id, study_name, storage_name, all_tokens)
+            args=(args, gpu_id, args.study_name, storage_name, all_tokens)
         )
         p.start()
         processes.append(p)
