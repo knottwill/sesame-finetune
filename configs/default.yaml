@@ -1,0 +1,8 @@
+batch_size: 16
+grad_acc_steps: 1
+learning_rate: 0.0001
+max_grad_norm: 1.0
+total_steps: 10000
+use_amp: true
+warmup_steps: 1000
+weight_decay: 0.001

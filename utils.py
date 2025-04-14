@@ -1,0 +1,170 @@
+import os
+import sys
+import types
+import torch
+import torch.nn.functional as F
+from huggingface_hub import hf_hub_download
+from moshi.models import loaders
+from pathlib import Path
+from typing import Union
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/csm")
+
+from csm.generator import Generator, load_llama3_tokenizer, load_watermarker
+from csm.models import Model, _create_causal_mask
+
+
+def load_tokenizers(device: Union[str, torch.device]):
+    """Load text and audio tokenizers."""
+    text_tokenizer = load_llama3_tokenizer()
+    mimi_weight = hf_hub_download(loaders.DEFAULT_REPO, loaders.MIMI_NAME)
+    mimi = loaders.get_mimi(mimi_weight, device=device)
+    mimi.set_num_codebooks(32)
+    audio_tokenizer = mimi
+    
+    return text_tokenizer, audio_tokenizer
+
+
+def lr_lambda(step: int, warmup_steps: int, total_steps: int, decay_type: str = "linear") -> float:
+    """Returns lambda for the learning rate scheduler for a linear warmup and specificable decay."""
+    if step < warmup_steps:
+        return step / warmup_steps
+    else:
+        if decay_type == "linear":
+            return (total_steps - step) / (total_steps - warmup_steps)
+        elif decay_type == "constant":
+            return 1.0
+        elif decay_type == "exponential":
+            return 0.1 ** ((step - warmup_steps) / (total_steps - warmup_steps))
+        elif decay_type == "cosine":
+            return 0.5 * (1 + torch.cos(torch.pi * (step - warmup_steps) / (total_steps - warmup_steps)))
+        else:
+            raise ValueError(f"Invalid decay type: {decay_type}")
+
+
+def forward(self, tokens: torch.Tensor, tokens_mask: torch.Tensor):
+    """
+    Forward pass for Sesame's CSM model.
+    This will be added to the model with `model.forward = types.MethodType(forward, model)`
+
+    Args:
+        tokens: (batch_size, seq_len, n_codebooks+1)
+        tokens_mask: (batch_size, seq_len, n_codebooks+1)
+    """
+    dtype = next(self.parameters()).dtype
+    bsz, seq_len, _ = tokens.size()
+    device = tokens.device
+
+    embeds = self._embed_tokens(tokens)
+
+    # retain just non-padding embeddings
+    masked_embeds = embeds * tokens_mask.unsqueeze(-1)
+    h = masked_embeds.sum(dim=2)
+
+    padding_mask = tokens_mask[:, :, 0] | tokens_mask[:, :, -1]  # [bsz, seq_len]
+    backbone_attn_mask = _create_causal_mask(seq_len, device)  # [seq_len, seq_len]
+    padding_3d = padding_mask.unsqueeze(-1) * padding_mask.unsqueeze(1)  # [bsz, seq_len, seq_len]
+    backbone_attn_mask = backbone_attn_mask.unsqueeze(0) * padding_3d
+    backbone_attn_mask = backbone_attn_mask | torch.eye(seq_len, device=device).bool().unsqueeze(0).expand(bsz, -1, -1)
+    input_pos = torch.arange(0, seq_len).unsqueeze(0).expand(bsz, seq_len).long().to(device)
+    h = self.backbone(h, input_pos=input_pos, mask=backbone_attn_mask).to(dtype=dtype)
+
+    audio_mask = tokens_mask[:, :, 0]  # [bsz, seq_len]
+    target_tokens = tokens[audio_mask][:, :-1]  # [audio_len, n_codebooks]
+    c_embeds = embeds[:, :, :-1, :][audio_mask]  # [audio_len, n_codebooks, embed_dim]
+    c_pos = input_pos[audio_mask]  # [audio_len]
+
+    audio_mask = torch.roll(audio_mask, -1, 1)
+    audio_h = h[audio_mask]  # [audio_len, embed_dim]
+
+    c0_logits = self.codebook0_head(audio_h)  # [audio_len, audio_vocab_size]
+    c0_target = target_tokens[:, 0]  # [audio_len]
+    c0_loss = F.cross_entropy(c0_logits, c0_target)
+
+    # compute amortization
+    indices = torch.randperm(c_embeds.size(0))[: c_embeds.size(0) // 16]
+    c_embeds = c_embeds[indices][:, :-1, :]  # [audio_len//16, n_codebooks-1, embed_dim]
+    audio_h = audio_h[indices]  # [audio_len//16, embed_dim]
+    target_tokens = target_tokens[indices][:, 1:]  # [audio_len//16, n_codebooks-1]
+
+    decoder_embeds = torch.cat(
+        [audio_h.unsqueeze(1), c_embeds], dim=1
+    )  # [audio_len//16, n_codebooks, embed_dim]
+    N, n_codebooks, _ = decoder_embeds.size()
+    c_pos = torch.arange(0, n_codebooks).unsqueeze(0).expand(N, n_codebooks).long().to(device)
+
+    decoder_causal_mask = _create_causal_mask(decoder_embeds.size(1), device).expand(N, -1, -1)
+    decoder_h = self.decoder(self.projection(decoder_embeds), input_pos=c_pos, mask=decoder_causal_mask).to(dtype=dtype)
+    c_logits = torch.einsum("bsd,sdv->bsv", decoder_h[:, 1:, :], self.audio_head)
+
+    c_loss = F.cross_entropy(c_logits.reshape(-1, c_logits.size(-1)), target_tokens.reshape(-1))
+
+    loss = c0_loss + c_loss
+    return loss
+
+
+def load_model(pretrained_model_name_or_path: Union[str, Path], device: Union[str, torch.device]):
+    """Load the model with the forward method and move to device."""    
+    model = Model.from_pretrained(pretrained_model_name_or_path)
+    model.forward = types.MethodType(forward, model)  # add the forward method to the model
+    model = model.to(device=device, dtype=torch.bfloat16)
+    return model
+
+
+def reset_caches(model: Model):
+    """Reset the caches of the model (used after each generation)."""
+    model.reset_caches()
+    for module in model.modules():
+        if hasattr(module, "cache_enabled"):
+            module.cache_enabled = False
+        if hasattr(module, "kv_cache"):
+            module.kv_cache = None
+
+
+def custom_generator_init(self, model: Model, audio_tokenizer: torch.nn.Module, text_tokenizer):
+    """Custom __init__ for the Generator class (from sesame csm repo)."""
+    self._model = model
+    self._model.setup_caches(1)
+
+    self._text_tokenizer = text_tokenizer
+
+    device = next(model.parameters()).device
+    self._audio_tokenizer = audio_tokenizer.to(device=device)
+    self.sample_rate = audio_tokenizer.sample_rate
+    self.device = device
+
+    self._watermarker = load_watermarker(device=device)
+
+
+def generate_audio(model, audio_tokenizer, text_tokenizer, text, speaker_id, device, use_amp=True, max_audio_length_ms=10_000):
+    """Generate audio from text."""
+    model.eval()
+    Generator.__init__ = types.MethodType(custom_generator_init, Generator)
+    generator = Generator(model, audio_tokenizer, text_tokenizer)
+    
+    with torch.no_grad(), torch.amp.autocast(device_type=str(device), enabled=use_amp):
+        audio = generator.generate(
+            text=text,
+            speaker=speaker_id,
+            context=[],
+            max_audio_length_ms=max_audio_length_ms,
+        )
+    
+    reset_caches(model)
+    return audio 
+
+
+def validate(model, valloader, device, use_amp=True):
+    """Validate the model on the validation set."""
+    model.eval()
+    val_losses = []
+    with torch.no_grad(), torch.amp.autocast(device_type=str(device), enabled=use_amp):
+        for val_tokens, val_tokens_mask in valloader:
+            val_tokens = val_tokens.to(device)
+            val_tokens_mask = val_tokens_mask.to(device)
+            val_loss = model(val_tokens, val_tokens_mask).item()
+            val_losses.append(val_loss)
+    
+    avg_val_loss = sum(val_losses) / len(val_losses)
+    return avg_val_loss

@@ -128,7 +128,7 @@ class CSMSampler(Sampler):
         return len(self.bins)
 
 
-def create_dataloaders(all_tokens: dict, batch_size: int):
+def create_dataloaders(all_tokens: dict, batch_size: int, infinite_train: bool = True):
     """Create dataloaders for the CSM model
 
     all_tokens = {
@@ -144,7 +144,7 @@ def create_dataloaders(all_tokens: dict, batch_size: int):
     trainsampler = CSMSampler(
         lengths=[len(tokens) for tokens in all_tokens["audio_tokens_train"]],
         batch_size=batch_size,
-        is_infinite=True,
+        is_infinite=infinite_train,
         shuffle=True,
     )
 
