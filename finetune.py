@@ -43,7 +43,7 @@ def parse_args(arg_string=None):
     parser.add_argument("--log_every", type=int, default=10)
     parser.add_argument("--val_every", type=int, default=100)
     parser.add_argument("--save_every", type=int, default=10_000)
-    parser.add_argument("--gen_every", type=int, default=100)
+    parser.add_argument("--gen_every", type=int, default=1000)
     parser.add_argument(
         "--gen_sentence",
         type=str,
@@ -53,7 +53,7 @@ def parse_args(arg_string=None):
     parser.add_argument("--gen_speaker", type=int, default=999, help="Speaker id for model to generate")
 
     parser.add_argument("--use_amp", action="store_true", help="Use Automatic Mixed Precision")
-    parser.add_argument("--n_epochs", type=int, default=None, help="Number of epochs to train. If not provided, the training will run indefinitely.")
+    parser.add_argument("--n_epochs", type=int, default=50, help="Number of epochs to train. If not provided, the training will run indefinitely.")
 
     args = parser.parse_args(arg_string.split() if arg_string else None)
 
@@ -78,7 +78,7 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
     trainloader, valloader = create_dataloaders(
         all_tokens, 
         config["batch_size"], 
-        infinite_train=args.n_epochs is None,
+        infinite_train=False,
     )
 
     config["total_steps"] = args.n_epochs * len(trainloader) if args.n_epochs else None
@@ -169,8 +169,7 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
                 )
             
             if args.gen_every and step % args.gen_every == 0:
-                # Generate audio
-                audio = generate_audio(
+                audio, wer = generate_audio(
                     model,
                     audio_tokenizer,
                     text_tokenizer,
@@ -182,7 +181,8 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
                 
                 wandb.log(
                     {
-                        "audio": wandb.Audio(audio.squeeze(0).cpu().numpy(), sample_rate=24_000),
+                        "audio": wandb.Audio(audio, sample_rate=24_000),
+                        "wer": wer,
                     },
                     step=step,
                 )
