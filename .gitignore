@@ -6,3 +6,5 @@ exp/
 sandbox.ipynb
 blog.md
 speechmatics*
+sweep/
+default_old.yaml

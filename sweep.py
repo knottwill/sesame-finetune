@@ -15,7 +15,7 @@ from finetune import finetune
 def parse_args(arg_string=None):   
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default="./data/tokens.pkl", type=str, help="Path to the pre-tokenized data")
-    parser.add_argument("--output_dir", type=Path, default="./exp", help="Path to save the model")
+    parser.add_argument("--output_dir", type=Path, default="./sweep", help="Path to save the model")
     parser.add_argument("--model", type=str, default="sesame/csm-1b", help="Option to specify local path")
     parser.add_argument("--sweep_config", type=str, default="./configs/sweep.yaml", help="Path to the sweep config")
     parser.add_argument("--wandb_api_key", type=str, required=True)
