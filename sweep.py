@@ -21,10 +21,10 @@ def parse_args(arg_string=None):
     parser.add_argument("--wandb_api_key", type=str, required=True)
     parser.add_argument("--wandb_project", type=str, default="csm-sweep", help="Name of the project")
     parser.add_argument("--study_name", type=str, default="csm-sweep", help="Name of the study")
-    parser.add_argument("--n_epochs", type=int, default=1, help="Number of epochs to train before evaluating")
+    parser.add_argument("--n_epochs", type=int, default=5, help="Number of epochs to train before evaluating")
     parser.add_argument("--n_trials", type=int, default=20, help="Number of Optuna trials")
     parser.add_argument("--device", type=str, default=None, help="Device to use (defaults to CUDA if available)")
-    parser.add_argument("--use_amp", type=bool, default=True, help="Use Automatic Mixed Precision Training")
+    parser.add_argument("--use_amp", type=bool, default=False, help="Use Automatic Mixed Precision Training")
     parser.add_argument("--n_gpus", type=int, default=2, help="Number of GPUs to use")
     parser.add_argument("--trials_per_gpu", type=int, default=1, help="Number of trials to run per GPU")
     parser.add_argument("--val_every", type=int, default=500, help="Number of steps between validation runs")
@@ -73,16 +73,16 @@ def worker(args, gpu_id, study_name, storage_name, all_tokens):
         with open(args.sweep_config, "r") as f:
             sweep_config = yaml.safe_load(f)
 
-        for param in sweep_config["parameters"]:
+        config = {}
+        for name, param in sweep_config.items():
             if param["type"] == "categorical":
-                config[param["name"]] = trial.suggest_categorical(param["name"], param["values"])
+                config[name] = trial.suggest_categorical(name, param["values"])
             elif param["type"] == "float":
-                config[param["name"]] = trial.suggest_float(param["name"], param["min"], param["max"], log=param["log"])
+                config[name] = trial.suggest_float(name, float(param["min"]), float(param["max"]), log=param["log"])
             elif param["type"] == "int":
-                config[param["name"]] = trial.suggest_int(param["name"], param["min"], param["max"])
+                config[name] = trial.suggest_int(name, int(param["min"]), int(param["max"]))
 
         config['grad_acc_steps'] = 1
-        config['use_amp'] = args.use_amp
         
         wandb.init(
             project=args.wandb_project,
@@ -117,7 +117,9 @@ def save_visualization(study):
     # Contour plots for pairs of parameters
     try:
         contour_fig = plot_contour(study, params=["learning_rate", "batch_size"])
-        contour_fig.write_html(str(args.output_dir / "contour_plot.html"))
+        contour_fig.write_html(str(args.output_dir / "lr_bsz_contour.html"))
+        contour_fig = plot_contour(study, params=["learning_rate", "weight_decay"])
+        contour_fig.write_html(str(args.output_dir / "lr_wd_contour.html"))
     except:
         print("Could not create contour plot")
 

@@ -42,7 +42,7 @@ def parse_args(arg_string=None):
 
     parser.add_argument("--log_every", type=int, default=10)
     parser.add_argument("--val_every", type=int, default=100)
-    parser.add_argument("--save_every", type=int, default=10_000)
+    parser.add_argument("--save_every", type=int, default=1000)
     parser.add_argument("--gen_every", type=int, default=1000)
     parser.add_argument(
         "--gen_sentence",
