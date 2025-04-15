@@ -118,10 +118,13 @@ def forward(self, tokens: torch.Tensor, tokens_mask: torch.Tensor):
     return loss
 
 
-def load_model(pretrained_model_name_or_path: Union[str, Path], device: Union[str, torch.device]):
+def load_model(pretrained_model_name_or_path: Union[str, Path], device: Union[str, torch.device], checkpoint_path: Union[str, Path, None] = None):
     """Load the model with the forward method and move to device."""    
     model = Model.from_pretrained(pretrained_model_name_or_path)
     model.forward = types.MethodType(forward, model)  # add the forward method to the model
+    if checkpoint_path:
+        state_dict = torch.load(checkpoint_path)['model']
+        model.load_state_dict(state_dict)
     model = model.to(device=device, dtype=torch.bfloat16)
     return model
 

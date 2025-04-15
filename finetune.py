@@ -103,6 +103,7 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
         "config": config,
         "all_tokens": all_tokens,
         "args": args,
+        "best_val_loss": float("inf"),
     }
     
     # Create progress bar
@@ -149,10 +150,17 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
             if args.save_every and (step % args.save_every == 0 or step == config["total_steps"] - 1):
                 state["model"] = model.state_dict()
                 torch.save(state, args.output_dir / f"model_{step}.pt")
+                if step == config["total_steps"] - 1:
+                    torch.save(state, args.output_dir / f"model_final.pt")
 
             if args.val_every and (step % args.val_every == 0 or step == config["total_steps"] - 1):
                 val_loss = validate(model, valloader, device, args.use_amp)
                 wandb.log({"val_loss": val_loss}, step=step)
+
+                if val_loss < state["best_val_loss"]:
+                    state["best_val_loss"] = val_loss
+                    torch.save(state, args.output_dir / f"model_bestval.pt")
+                    wandb.save(args.output_dir / f"wandb_bestval.pt")
 
                 # If this finetune is part of a sweep, report the validation loss to Optuna for pruning
                 if trial is not None:

@@ -22,6 +22,8 @@ from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 
 from csm.generator import load_llama3_tokenizer
 
+from utils import load_tokenizers
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--train_data", type=Path, help="Path to the training metadata", required=True)
 parser.add_argument("--val_data", type=Path, help="Path to the validation metadata", required=True)
@@ -89,11 +91,8 @@ def get_tokens(
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    text_tokenizer = load_llama3_tokenizer()
-    mimi_weight = hf_hub_download(loaders.DEFAULT_REPO, loaders.MIMI_NAME)
-    audio_tokenizer = loaders.get_mimi(mimi_weight, device=device)
-    audio_tokenizer.set_num_codebooks(32)
+    
+    text_tokenizer, audio_tokenizer = load_tokenizers(device)
 
     print(f"Tokenizing training data from {args.train_data}")
     audio_tokens_train, text_tokens_train = get_tokens(args.train_data, audio_tokenizer, text_tokenizer, device)

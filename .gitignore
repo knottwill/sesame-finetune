@@ -9,3 +9,5 @@ speechmatics*
 sweep/
 default_old.yaml
 *.wav
+french/
+gen.ipynb
