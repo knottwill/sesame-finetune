@@ -10,6 +10,14 @@ python3.10 -m venv .venv
 source .venv/bin/activate
 ```
 
+```bash
+git clone https://github.com/SesameAILabs/csm.git ~/csm
+cd ~/csm
+export
+```
+
+export CSM_PATH="my_value" >> .venv/bin/activate
+
 Install the dependencies with:
 ```bash
 ./install_dependencies.sh
