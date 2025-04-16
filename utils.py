@@ -17,11 +17,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) + "/csm")
 
 try:
-    sys.path.append(os.environ["CSM_PATH"])
+    sys.path.append(os.getenv("CSM_PATH", "~/csm"))
     from generator import Generator, load_llama3_tokenizer, load_watermarker
     from models import Model, _create_causal_mask
-except:
-    
+except ImportError:
+    raise ImportError("CSM not found. Please set the CSM_PATH environment variable to the path of the CSM repo.")
 
 
 class WarmupDecayLR(LambdaLR):
