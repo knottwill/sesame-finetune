@@ -25,7 +25,7 @@ def parse_args(arg_string=None):
     parser.add_argument("--n_trials", type=int, default=20, help="Number of Optuna trials")
     parser.add_argument("--device", type=str, default=None, help="Device to use (defaults to CUDA if available)")
     parser.add_argument("--use_amp", type=bool, default=False, help="Use Automatic Mixed Precision Training")
-    parser.add_argument("--n_gpus", type=int, default=2, help="Number of GPUs to use")
+    parser.add_argument("--n_gpus", type=int, default=1, help="Number of GPUs to use")
     parser.add_argument("--trials_per_gpu", type=int, default=1, help="Number of trials to run per GPU")
     parser.add_argument("--val_every", type=int, default=500, help="Number of steps between validation runs")
     parser.add_argument("--gen_every", type=int, default=0, help="Number of steps between generation runs")
