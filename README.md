@@ -48,7 +48,7 @@ Prepare your dataset with train set and validation set metadata files with each 
 Since we will want to train for several epochs, it is more efficient to pre-tokenize all the data before starting the training run:
 
 ```bash
-python pretokenize.py --train_data /path/to/train/metadata.json --val_data /path/to/val/metadata.json --output /path/to/pre-tokenized/data.pkl
+python pretokenize.py --train_data /path/to/train/metadata.json --val_data /path/to/val/metadata.json --output /path/to/tokenized/data.pkl
 ```
 
 **(Optional) Hyperparameter sweep**
@@ -56,7 +56,7 @@ python pretokenize.py --train_data /path/to/train/metadata.json --val_data /path
 To perform a hyperparameter sweep, specify the path to the pre-tokenized data, an experiment directory, the number of epochs to run for each trial, the number of trials, and the number of GPUs (for parallelism of trials). You will also need to provide a Weights & Biases API key for comparing the sweeps. 
 
 ```bash
-python sweep.py --data /data/tokens.pkl --ouput_dir ./my-first-sweep --wandb_api_key WANDB_API_KEY --sweep_config ./configs/sweep.yaml --n_epochs 3 --n_trials 50 --n_gpus 2
+python sweep.py --data /path/to/tokenized/data.pkl --ouput_dir ./my-first-sweep --wandb_api_key WANDB_API_KEY --sweep_config ./configs/sweep.yaml --n_epochs 3 --n_trials 50 --n_gpus 2
 ```
 
 **Finetune**
@@ -64,5 +64,5 @@ python sweep.py --data /data/tokens.pkl --ouput_dir ./my-first-sweep --wandb_api
 To finetune the model, you will need to provide the pre-tokenized data, a finetuning hyperparameters config file, a Weights & Biases API key to track the experiment, the number of epochs to train for, and what sentence to use when generating.
 
 ```bash
-python finetune.py --data /data/french_tokens.pkl --config ./configs/default.yaml --wandb_api_key WANDB_API_KEY --n_epochs 25 --gen_sentence "Les étoiles brillent dans le ciel nocturne comme des diamants scintillants." --gen_every 200
+python finetune.py --data /path/to/tokenized/data.pkl --config ./configs/default.yaml --wandb_api_key WANDB_API_KEY --n_epochs 25 --gen_sentence "Les étoiles brillent dans le ciel nocturne comme des diamants scintillants." --gen_every 200
 ```
