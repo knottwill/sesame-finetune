@@ -4,7 +4,7 @@ __pycache__
 data/
 exp/
 sandbox.ipynb
-speechmatics*
+speechmatics*.py
 sweep/
 default_old.yaml
 *.wav
