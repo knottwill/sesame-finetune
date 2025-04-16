@@ -71,27 +71,21 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
 
     eff_batch_size = config["batch_size"] * config["grad_acc_steps"]
     
-    # Load model and tokenizers
+    # Load / create: model, tokenizers, dataloaders, optimizer, scheduler, and grad scaler.
     model = load_model(args.model, device)
     text_tokenizer, audio_tokenizer = load_tokenizers(device)
-    
-    # Setup dataloaders
     trainloader, valloader = create_dataloaders(
         all_tokens, 
         config["batch_size"], 
         infinite_train=False,
     )
-
-    config["total_steps"] = args.n_epochs * len(trainloader) if args.n_epochs else None
-    
-    # Setup optimizer and scheduler
+    total_steps = args.n_epochs * len(trainloader) if args.n_epochs else None
     optimizer = torch.optim.AdamW(
         model.parameters(), 
         lr=config["learning_rate"],
         weight_decay=config["weight_decay"]
     )
-    
-    scheduler = WarmupDecayLR(optimizer, config["warmup_steps"], config["total_steps"], config["lr_decay"])
+    scheduler = WarmupDecayLR(optimizer, config["warmup_steps"], total_steps, config["lr_decay"])
     scaler = GradScaler(enabled=args.use_amp)
 
     state = {
@@ -106,13 +100,10 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
         "best_val_loss": float("inf"),
     }
     
-    # Create progress bar
-    desc = "Training" if trial is None else f"Trial {trial.number}"
-    pbar = tqdm(total=config["total_steps"], desc=desc)
-    
     # Training loop
     step = 0
     train_losses = []
+    pbar = tqdm(total=total_steps, desc="Training" if trial is None else f"Trial {trial.number}")
     model.train()
     
     for epoch in range(args.n_epochs):
@@ -147,13 +138,13 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
                 )
                 train_losses = []
 
-            if args.save_every and (step % args.save_every == 0 or step == config["total_steps"] - 1):
+            if args.save_every and (step % args.save_every == 0 or step == total_steps - 1):
                 state["model"] = model.state_dict()
                 torch.save(state, args.output_dir / f"model_{step}.pt")
-                if step == config["total_steps"] - 1:
+                if step == total_steps - 1:
                     torch.save(state, args.output_dir / f"model_final.pt")
 
-            if args.val_every and (step % args.val_every == 0 or step == config["total_steps"] - 1):
+            if args.val_every and (step % args.val_every == 0 or step == total_steps - 1):
                 val_loss = validate(model, valloader, device, args.use_amp)
                 wandb.log({"val_loss": val_loss}, step=step)
 
@@ -207,7 +198,7 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
             
             pbar.update(1)
             
-            if step >= config["total_steps"]:
+            if step >= total_steps:
                 break
             
             step += 1
