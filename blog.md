@@ -502,4 +502,142 @@ for epoch in range(n_epochs):
 ```
 
 
-##### (Optional) Hyperparameter Optimization
+#### (Optional) Hyperparameter Optimization
+
+Successful finetuning is fairly sensitive to the choice of hyperparameters, hence it is wise to sweep hyperparameters before the main finetuning run. Once again, below is a much simplified version of the hyperparameter sweeping functionality in our [repo]
+
+```python
+import os
+import pickle
+from pathlib import Path
+import yaml
+import optuna
+import torch
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import LinearLR
+from tqdm import tqdm
+import types
+
+sys.path.append(os.getenv("CSM_PATH", "~/csm"))
+from models import model
+
+# Hardcoded configuration
+DATA_PATH = "./data/tokens.pkl"
+OUTPUT_DIR = Path("./sweep")
+SWEEP_CONFIG = "./configs/sweep.yaml"
+N_EPOCHS = 3
+N_TRIALS = 10
+
+# Create output directory
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+def toy_finetune(config, device, all_tokens, trial=None):
+    """
+    Simplified version of the finetune function for toy_sweep.py
+    """
+    # Setup model
+    model = Model.from_pretrained("sesame/csm-1b")
+    model.forward = types.MethodType(forward, model)
+    model = model.to(device=device, dtype=torch.bfloat16)
+    
+    # Create dataloaders
+    trainloader, valloader = create_dataloaders(all_tokens, config["batch_size"])
+    
+    # Setup training
+    optimizer = AdamW(model.parameters(), lr=config["learning_rate"], weight_decay=config["weight_decay"])
+    scheduler = LinearLR(optimizer, total_iters=N_EPOCHS * len(trainloader))
+    
+    # Training loop
+    model.train()
+    best_val_loss = float('inf')
+    
+    for epoch in range(N_EPOCHS):
+        # Training
+        train_losses = []
+        for tokens, tokens_mask in tqdm(trainloader, desc=f"Epoch {epoch}"):
+            tokens = tokens.to(device)
+            tokens_mask = tokens_mask.to(device)
+            
+            loss = model(tokens, tokens_mask)
+            loss.backward()
+            
+            optimizer.step()
+            optimizer.zero_grad()
+            scheduler.step()
+            
+            train_losses.append(loss.item())
+        
+        # Validation
+        model.eval()
+        val_losses = []
+        with torch.no_grad():
+            for tokens, tokens_mask in valloader:
+                tokens = tokens.to(device)
+                tokens_mask = tokens_mask.to(device)
+                loss = model(tokens, tokens_mask)
+                val_losses.append(loss.item())
+        
+        val_loss = sum(val_losses) / len(val_losses)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+        
+        # Report to Optuna for pruning
+        if trial is not None:
+            trial.report(val_loss, epoch)
+            if trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
+        
+        model.train()
+    
+    return best_val_loss
+
+def objective(trial, device, all_tokens):
+    # Load sweep configuration
+    with open(SWEEP_CONFIG, "r") as f:
+        sweep_config = yaml.safe_load(f)
+
+    # Sample hyperparameters
+    config = {}
+    for name, param in sweep_config.items():
+        if param["type"] == "categorical":
+            config[name] = trial.suggest_categorical(name, param["values"])
+        elif param["type"] == "float":
+            config[name] = trial.suggest_float(name, float(param["min"]), float(param["max"]), log=param["log"])
+        elif param["type"] == "int":
+            config[name] = trial.suggest_int(name, int(param["min"]), int(param["max"]))
+
+    # Run training and get validation loss
+    final_val_loss = toy_finetune(config, device, all_tokens, trial)
+    return final_val_loss
+
+if __name__ == "__main__":
+    # Load data
+    with open(DATA_PATH, "rb") as f:
+        all_tokens = pickle.load(f)
+    
+    # Setup device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Create study
+    study = optuna.create_study(
+        study_name="toy_sweep",
+        direction="minimize",
+        pruner=optuna.pruners.MedianPruner()
+    )
+    
+    # Run optimization
+    study.optimize(
+        lambda trial: objective(trial, device, all_tokens),
+        n_trials=N_TRIALS
+    )
+    
+    # Save best configuration
+    with open(OUTPUT_DIR / "best_config.yaml", "w") as f:
+        yaml.safe_dump(study.best_trial.params, f, default_flow_style=False)
+    
+    print(f"Best trial:")
+    print(f"  Value: {study.best_trial.value}")
+    print(f"  Params: ")
+    for key, value in study.best_trial.params.items():
+        print(f"    {key}: {value}") 
+```
