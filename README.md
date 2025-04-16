@@ -8,13 +8,18 @@ git clone https://github.com/knottwill/sesame-finetune.git
 cd sesame-finetune
 python3.10 -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-Install the dependencies with:
+Annoyingly, the [CSM repo](https://github.com/SesameAILabs/csm) is not set up to be installable as a package (despite the `setup.py`), to use the code we need to manually clone the repo and add it to our `sys.path`. 
+
 ```bash
-./install_dependencies.sh
+git clone https://github.com/SesameAILabs/csm.git ~/csm
+export CSM_PATH='~/csm'
+echo export CSM_PATH='~/csm' >> .venv/bin/activate
 ```
-This clones the official sesame CSM repo, checks out the right commit, installs their requirements, installs the repo as a package, then installs our additional requirements.
+
+Now when we want to import code from the CSM repo we can use `sys.path.append(os.getenv("CSM_PATH", "~/csm"))`. 
 
 ### Usage
 
