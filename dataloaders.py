@@ -29,8 +29,8 @@ def collate_fn(batch: List[dict]):
     tokens, tokens_mask = [], []
     n_codebooks = 32
     for item in batch:
-        audio_tokens = torch.tensor(item["audio"])
-        text_tokens = torch.tensor(item["text"])
+        audio_tokens = torch.tensor(item["audio"]) # [n_codebooks, audio_seq_len]
+        text_tokens = torch.tensor(item["text"])   # [text_seq_len]
 
         # add EOS frame
         eos_frame = torch.zeros(audio_tokens.size(0), 1)
@@ -53,10 +53,11 @@ def collate_fn(batch: List[dict]):
     tokens = pad_sequence(tokens, batch_first=True)
     tokens_mask = pad_sequence(tokens_mask, batch_first=True, padding_value=False)
 
+    # [batch_size, max_seq_len, n_codebooks+1]
     return tokens, tokens_mask
 
 
-class CSMSampler(torch.utils.data.sampler.Sampler):
+class BucketSampler(torch.utils.data.sampler.Sampler):
     """Sampler that groups samples of similar lengths to minimize padding in batches."""
 
     def __init__(
@@ -120,7 +121,7 @@ class CSMSampler(torch.utils.data.sampler.Sampler):
         return len(self.bins)
 
 
-def create_dataloaders(all_tokens: dict, batch_size: int, infinite_train: bool = True):
+def create_dataloaders(all_tokens: dict, batch_size: int, infinite_train: bool = False):
     """Create dataloaders for the CSM model
 
     all_tokens = {
@@ -133,14 +134,14 @@ def create_dataloaders(all_tokens: dict, batch_size: int, infinite_train: bool =
     trainset = TokenizedDataset(all_tokens["audio_tokens_train"], all_tokens["text_tokens_train"])
     valset = TokenizedDataset(all_tokens["audio_tokens_val"], all_tokens["text_tokens_val"])
 
-    trainsampler = CSMSampler(
+    trainsampler = BucketSampler(
         lengths=[len(tokens) for tokens in all_tokens["audio_tokens_train"]],
         batch_size=batch_size,
         is_infinite=infinite_train,
         shuffle=True,
     )
 
-    valsampler = CSMSampler(
+    valsampler = BucketSampler(
         lengths=[len(tokens) for tokens in all_tokens["audio_tokens_val"]],
         batch_size=batch_size,
         is_infinite=False,

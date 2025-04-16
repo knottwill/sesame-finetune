@@ -81,8 +81,6 @@ def worker(args, gpu_id, study_name, storage_name, all_tokens):
                 config[name] = trial.suggest_float(name, float(param["min"]), float(param["max"]), log=param["log"])
             elif param["type"] == "int":
                 config[name] = trial.suggest_int(name, int(param["min"]), int(param["max"]))
-
-        config['grad_acc_steps'] = 1
         
         wandb.init(
             project=args.wandb_project,
@@ -160,12 +158,8 @@ if __name__ == "__main__":
     for p in processes:
         p.join()
 
-    config = {
-        "best_params": study.best_trial.params,
-        "best_value": study.best_trial.value
-    }
     with open(args.output_dir / "config.yaml", "w") as f:
-        yaml.safe_dump(config, f, default_flow_style=False)
+        yaml.safe_dump(study.best_trial.params, f, default_flow_style=False)
     
     save_visualization(study)
     

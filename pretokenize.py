@@ -24,12 +24,15 @@ from csm.generator import load_llama3_tokenizer
 
 from utils import load_tokenizers
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--train_data", type=Path, help="Path to the training metadata", required=True)
-parser.add_argument("--val_data", type=Path, help="Path to the validation metadata", required=True)
-parser.add_argument("--output", type=Path, default="./data/tokens.pkl", help="Path to save the computed tokens", required=True)
-args = parser.parse_args()
-args.output.parent.mkdir(parents=True, exist_ok=True)
+
+def parse_args(arg_string=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train_data", type=Path, help="Path to the training metadata", required=True)
+    parser.add_argument("--val_data", type=Path, help="Path to the validation metadata", required=True)
+    parser.add_argument("--output", type=Path, default="./data/tokens.pkl", help="Path to save the computed tokens", required=True)
+    args = parser.parse_args(arg_string.split() if arg_string else None)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    return args
 
 
 def load_metadata(data_path: Path):
@@ -90,6 +93,7 @@ def get_tokens(
 
 
 if __name__ == "__main__":
+    args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     text_tokenizer, audio_tokenizer = load_tokenizers(device)

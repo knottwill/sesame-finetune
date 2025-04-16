@@ -71,12 +71,19 @@ def forward(self, tokens: torch.Tensor, tokens_mask: torch.Tensor):
     bsz, seq_len, _ = tokens.size()
     device = tokens.device
 
+    # embed tokens
     embeds = self._embed_tokens(tokens)
+
+    # get targets and codebook embeddings corresponding to audio tokens
+    audio_mask = tokens_mask[:, :, 0]  # [bsz, seq_len]
+    target_tokens = tokens[audio_mask][:, :-1]  # [audio_len, n_codebooks]
+    c_embeds = embeds[:, :, :-1, :][audio_mask]  # [audio_len, n_codebooks, embed_dim] 
 
     # retain just non-padding embeddings
     masked_embeds = embeds * tokens_mask.unsqueeze(-1)
     h = masked_embeds.sum(dim=2)
 
+    # backbone forward pass
     padding_mask = tokens_mask[:, :, 0] | tokens_mask[:, :, -1]  # [bsz, seq_len]
     backbone_attn_mask = _create_causal_mask(seq_len, device)  # [seq_len, seq_len]
     padding_3d = padding_mask.unsqueeze(-1) * padding_mask.unsqueeze(1)  # [bsz, seq_len, seq_len]
@@ -85,24 +92,22 @@ def forward(self, tokens: torch.Tensor, tokens_mask: torch.Tensor):
     input_pos = torch.arange(0, seq_len).unsqueeze(0).expand(bsz, seq_len).long().to(device)
     h = self.backbone(h, input_pos=input_pos, mask=backbone_attn_mask).to(dtype=dtype)
 
-    audio_mask = tokens_mask[:, :, 0]  # [bsz, seq_len]
-    target_tokens = tokens[audio_mask][:, :-1]  # [audio_len, n_codebooks]
-    c_embeds = embeds[:, :, :-1, :][audio_mask]  # [audio_len, n_codebooks, embed_dim]
-    c_pos = input_pos[audio_mask]  # [audio_len]
-
-    audio_mask = torch.roll(audio_mask, -1, 1)
+    # get backbone embeddings used for audio codebook prediction
+    audio_mask = torch.roll(audio_mask, -1, 1)  # shift audio mask to the right by 1
     audio_h = h[audio_mask]  # [audio_len, embed_dim]
 
+    # predict first codebook and compute loss
     c0_logits = self.codebook0_head(audio_h)  # [audio_len, audio_vocab_size]
     c0_target = target_tokens[:, 0]  # [audio_len]
     c0_loss = F.cross_entropy(c0_logits, c0_target)
 
-    # compute amortization
+    # "compute amortization" (train decoder on random 1/16 subset of audio tokens)
     indices = torch.randperm(c_embeds.size(0))[: c_embeds.size(0) // 16]
     c_embeds = c_embeds[indices][:, :-1, :]  # [audio_len//16, n_codebooks-1, embed_dim]
     audio_h = audio_h[indices]  # [audio_len//16, embed_dim]
     target_tokens = target_tokens[indices][:, 1:]  # [audio_len//16, n_codebooks-1]
 
+    # concatenate backbone embeddings and codebook embeddings for decoder input
     decoder_embeds = torch.cat(
         [audio_h.unsqueeze(1), c_embeds], dim=1
     )  # [audio_len//16, n_codebooks, embed_dim]
