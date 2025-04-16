@@ -1,3 +1,7 @@
+<h1 align="center">
+    <img src="media/speechmatics_logo.png" alt="Speechmatics" width="600">
+</h1>
+
 # Finetune Sesame AI's Conversational Speech Model.
 
 ### Installation
