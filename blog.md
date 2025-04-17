@@ -11,8 +11,7 @@ You will learn how to:
 - Sweep finetuning hyperparameters using Optuna.
 - Finetune the model & track progress with Weights & Biases. 
 
-**Pre-requisites**
-- Understanding of pytorch and deep learning.
+I am going to assume some knowledge of deep learning, generative models, and implementation of these things in PyTorch. 
 
 **Quickstart**
 
@@ -29,9 +28,17 @@ python sweep.py --data /path/to/tokenized/data.pkl --sweep_config ./configs/swee
 python finetune.py --data /path/to/tokenized/data.pkl --config ./configs/default.yaml --n_epochs 25 --gen_every 500 --gen_sentence "Marie aime les pommes et les poires." --wandb_api_key WANDB_API_KEY
 ```
 
-### Model architecture and training
+### Model description 
+
+Much like many contemporary generative models of audio, images, and video, Sesame's CSM is an autoregressive transformer that operates in the latent space of a separately trained autoencoder. In particular, it operates on discrete audio tokens encoded by the [Mimi split-RVQ tokenizer](https://arxiv.org/html/2410.00037v2) (as well as text tokenized by the [Llama tokenizer](https://huggingface.co/meta-llama/Llama-3.2-1B)). There are two main reasons why this typically works better than operating on "raw" audio. Firstly, only a small fraction of raw audio content is actually perceptable to humans and the rest is noise. Discrete audio tokenizers like Mimi are good at retaining just the perceptable signal, allowing the generative model to focus purely on what "matters". Secondly, autoregressive transformers generally work better on discrete inputs. 
+
+ We don't really need to understand these tokenizers in depth since Sesame uses them as-is, but to quickly summarise:
+- Mimi is
+
+The architecture of Sesame's CSM-1B is given by a 1B transformer backbone and 100M transformer decoder, both of which are variants of the Llama architecture. 
 
   Before we jump into implementation, I want to quickly summarise the architecture and clarify some technical points that are relevant for finetuning. I also recommend reading the [official blog post](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo), which gives a great description of the model.
+- Similar to most contemporary generative models 
 - CSM-1B consists of a 1B transformer backbone and 100M transformer decoder, both of which are variants of the Llama architecture. Audio is tokenized by the [Mimi split-RVQ tokenizer](https://arxiv.org/html/2410.00037v2) and text is tokenized by the (Llama tokenizer)[https://huggingface.co/meta-llama/Llama-3.2-1B].
 - Speaker information is encoded by simply pre-pending a speaker ID to the text prior to tokenization. Eg. "[3]I am so hungry right now" if the corresponding audio is spoken by speaker 3.
 - The audio and text tokens are interweaved. I highly suspect that the motivation for this is that Sesame wanted their model to sound really conversational, so they would have trained on a large amount of conversational data (Eg. podcasts), and then the training data might look something like:
