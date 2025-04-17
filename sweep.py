@@ -81,6 +81,8 @@ def worker(args, gpu_id, study_name, storage_name, all_tokens):
                 config[name] = trial.suggest_float(name, float(param["min"]), float(param["max"]), log=param["log"])
             elif param["type"] == "int":
                 config[name] = trial.suggest_int(name, int(param["min"]), int(param["max"]))
+            elif param["type"] == "fixed":
+                config[name] = eval(param["value"])
         
         wandb.init(
             project=args.wandb_project,
