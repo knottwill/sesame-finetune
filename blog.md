@@ -1,21 +1,18 @@
 # How to Finetune Sesame AI's Speech Model in New Languages and Voices.
 
-**Summary:** Sesame AI recently stirred up a tonne of hype with their open-source ultra-realistic [conversational speech model](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo). In this blog we will learn how to finetune it on new languages and voices.
+Sesame AI recently stirred up a lot hype with their open source ultra-realistic [conversational speech model](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo), but they did not open source their training code and it only comes in a handful of english voices. The point of this blog is to teach you how to finetune it on new languages and voices.
 
-Samples
+Examples
 - French:
 - Spanish:
 
-You will learn how to:
-- Prepare a finetuning dataset. 
-- Sweep finetuning hyperparameters using Optuna.
-- Finetune the model & track progress with Weights & Biases. 
+Specifically, you will learn:
+- (Theory).
+- How to prepare a finetuning dataset.
+- How to sweep finetuning hyperparameters (using Optuna).
+- How to actually finetune the model.
 
-I am going to assume some knowledge of deep learning, generative models, and implementation of these things in PyTorch. 
-
-**Quickstart**
-
-If you don't care about the technical details and just want to finetune the CSM on your own dataset, please clone our [GitHub repo](https://github.com/knottwill/sesame-finetune.git) and follow the `README.md` instructions. You can finetune on your own data with 3 commands:
+If you don't care about any of the technical details and want to jump straight into finetuning on your own datasets, please clone the accompanying [GitHub repo](https://github.com/knottwill/sesame-finetune.git) and follow the `README.md`. You only need to use the following 3 commands:
 
 ```bash
 # Pre-tokenize data (for efficient training)
@@ -28,12 +25,22 @@ python sweep.py --data /path/to/tokenized/data.pkl --sweep_config ./configs/swee
 python finetune.py --data /path/to/tokenized/data.pkl --config ./configs/default.yaml --n_epochs 25 --gen_every 500 --gen_sentence "Marie aime les pommes et les poires." --wandb_api_key WANDB_API_KEY
 ```
 
-### Model description 
+I am going to assume some knowledge of deep learning, generative models, and implementation of these things in PyTorch. 
+
+### Theory (Model architecture, motivation, and training)
+
+Before we jump into implementation, I want to [describe what we say here - quickly summarise the architecture and clarify some technical points that are relevant for finetuning]. I also recommend reading the [official blog post](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo), which gives a great description of the model.
 
 Much like many contemporary generative models of audio, images, and video, Sesame's CSM is an autoregressive transformer that operates in the latent space of a separately trained autoencoder. In particular, it operates on discrete audio tokens encoded by the [Mimi split-RVQ tokenizer](https://arxiv.org/html/2410.00037v2) (as well as text tokenized by the [Llama tokenizer](https://huggingface.co/meta-llama/Llama-3.2-1B)). There are two main reasons why this typically works better than operating on "raw" audio. Firstly, only a small fraction of raw audio content is actually perceptable to humans and the rest is noise. Discrete audio tokenizers like Mimi are good at retaining just the perceptable signal, allowing the generative model to focus purely on what "matters". Secondly, autoregressive transformers generally work better on discrete inputs. 
 
- We don't really need to understand these tokenizers in depth since Sesame uses them as-is, but to quickly summarise:
-- Mimi is
+Links: https://marcodsn.me/posts/exploring-mimi, https://www.assemblyai.com/blog/what-is-residual-vector-quantization, https://arxiv.org/pdf/2410.00037
+
+We don't really need to understand Mimi in depth since Sesame uses it as-is, but to quickly summarise, it consists of: 
+- An encoder that splits the audio signal into frames, passes each frame through a convolutional neural network and a transformer to produce a continuous latent vector for each frame.
+- The latent vector is quantized by residual vector quantization: (explain)
+- The decoder takes this compressed signal and reconstructs it into an audio stream. 
+
+[Maybe an image here of Mimi / RVQ]
 
 The architecture of Sesame's CSM-1B is given by a 1B transformer backbone and 100M transformer decoder, both of which are variants of the Llama architecture. 
 
@@ -54,7 +61,7 @@ The architecture of Sesame's CSM-1B is given by a 1B transformer backbone and 10
 - *Compute amortization*: The audio decoder is processing an effective batch size of `batch_size x sequence_length x num_codebooks`, which is a high memory burden and thus it significantly slows training and limits model scaling. To address this, the audio decoder is only trained on a random 1/16 subset of the audio frame, but the zeroth codebook is trained on every frame.
 - *Loss:* Sesame did not release all the details of their training procedure, but since we are using discrete tokens it is a safe assumption that the model is trained using cross entropy loss.
 
-### Finetuning Implementation
+### Implementation
 
 Now we have an understanding of the model and training procedure, lets look at how to implement the finetuning pipeline. Most TTS datasets are not conversational, hence to make this tutorial as compatible as possible with *your* data, we will not be interweaving text and audio as described above. However, I would definitely recommend doing this if you are using conversational data. 
 
@@ -428,72 +435,55 @@ We can add a custom forward function with:
 import types
 
 sys.path.append(os.getenv("CSM_PATH", "~/csm"))
-from models import model
+from models import Model
 
-model = Model.from_pretrained("sesame/csm-1b")
-model.forward = types.MethodType(forward, model)  # add the forward method to the model
-model = model.to(device=device, dtype=torch.bfloat16)
+def load_model(pretrained_model_name_or_path, device, decoder_loss_weight):
+    model = Model.from_pretrained(pretrained_model_name_or_path)
+    model.decoder_loss_weight = decoder_loss_weight
+    model.forward = types.MethodType(forward, model)  # add the forward method to the model
+    model = model.to(device=device, dtype=torch.bfloat16)
+    return model
 ```
 
 #### 5. Training 
 
-We now have all the elements to write our training pipeline. First create a `config.yaml` to hold the finetuning hyperparameters:
-
-```yaml
-batch_size: 8
-weight_decay: 0.002
-learning_rate: 0.00003
-lr_decay: linear
-warmup_steps: 1000
-max_grad_norm: 1.3
-grad_acc_steps: 1
-```
-
-Below is a heavily simplified version of the training code from our [GitHub repo](https://github.com/knottwill/sesame-finetune.git). For best performance we **highly** recommend referring to the repo, which implements such things as gradient clipping, gradient accumulation, mixed precision training, better learning rate scheduling, experiment tracking with Wandb, logging of validation and generations etc.
+We now have all the elements to write our training pipeline. Below is an extremely simple training pipeline for illustration purposes only. For best performance we **highly** recommend referring to the [GitHub repo](https://github.com/knottwill/sesame-finetune.git), which implements such things as gradient clipping, gradient accumulation, mixed precision training, better learning rate scheduling, experiment tracking with Wandb, logging of validation and generations etc.
 
 ```python
 import os
 import pickle
 from pathlib import Path
-import yaml
 import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LinearLR
 from tqdm import tqdm
-import types
 
 sys.path.append(os.getenv("CSM_PATH", "~/csm"))
-from models import model
+from models import Model
 
-# Training parameters
-data_path = "/path/to/tokenized/data.pkl"
-output_dir = Path("./exp") 
-config_path = './config.yaml'
 n_epochs = 50
-
+output_dir = Path("./exp") 
 output_dir.mkdir(parents=True, exist_ok=True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-with open(config_path, 'r') as f:
-    config = yaml.safe_load(f)
+config = {
+    "batch_size": 8,
+    "learning_rate": 3e-5,
+    "weight_decay": 0.002,
+    "decoder_loss_weight": 0.5,
+}
 
-with open(data_path, "rb") as f:
+with open("/path/to/tokenized/data.pkl", "rb") as f:
     all_tokens = pickle.load(f)
 
-# Setup model
-model = Model.from_pretrained("sesame/csm-1b")
-model.forward = types.MethodType(forward, model)
-model = model.to(device=device, dtype=torch.bfloat16)
-
-# Create dataloaders
+# Set-up (model, dataloaders, optimizer, LR scheduler)
+model = load_model("sesame/csm-1b", device, config["decoder_loss_weight"])
 trainloader, valloader = create_dataloaders(all_tokens, config["batch_size"])
-
-# Setup training
 optimizer = AdamW(model.parameters(), lr=config["learning_rate"], weight_decay=config["weight_decay"])
 scheduler = LinearLR(optimizer, total_iters=n_epochs * len(trainloader))
 
-# Training loop
+# Simple training loop
 model.train()
 for epoch in range(n_epochs):
     for tokens, tokens_mask in tqdm(trainloader, desc=f"Epoch {epoch}"):
@@ -511,7 +501,15 @@ for epoch in range(n_epochs):
 
 #### (Optional) Hyperparameter Optimization
 
-Successful finetuning is fairly sensitive to the choice of hyperparameters, hence it is wise to sweep hyperparameters before the main finetuning run. Once again, below is a much simplified version of the hyperparameter sweeping functionality in our [repo]
+Successful finetuning of the CSM is fairly sensitive to the choice of hyperparameters, hence it is wise to sweep hyperparameters before the main finetuning run. I recommend using [my script](https://github.com/knottwill/sesame-finetune/blob/main/sweep.py) to perform this sweep, which offers:
+- Parallelism of trials across multiple devices or within a single device.
+- Logging of trials to Weights & Biases for comparison. For example:
+![Sweep-Wandb](media/sweep_tracking.png)
+- Various visualizations of results:
+    - Contours:
+    - Parameter importance:
+
+For illustration purposes only, below is a simplified version of this script:
 
 ```python
 import os
@@ -526,24 +524,21 @@ from tqdm import tqdm
 import types
 
 sys.path.append(os.getenv("CSM_PATH", "~/csm"))
-from models import model
+from models import Model
 
-# Hardcoded configuration
-DATA_PATH = "./data/tokens.pkl"
-OUTPUT_DIR = Path("./sweep")
-SWEEP_CONFIG = "./configs/sweep.yaml"
-N_EPOCHS = 3
-N_TRIALS = 10
 
-# Create output directory
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def objective(trial, device, all_tokens, n_epochs):
 
-def toy_finetune(config, device, all_tokens, trial=None):
-    """
-    Simplified version of the finetune function for toy_sweep.py
-    """
+    config = {
+        "batch_size": trial.suggest_categorical("batch_size", [8, 16, 32]),
+        "learning_rate": trial.suggest_float("learning_rate", 1e-6, 1e-2, log=True),
+        "weight_decay": trial.suggest_float("weight_decay", 1e-3, 1e-1, log=True),
+        "decoder_loss_weight": trial.suggest_float("decoder_loss_weight", 0.0, 1.0),
+    }
+
     # Setup model
     model = Model.from_pretrained("sesame/csm-1b")
+    model.decoder_loss_weight = config["decoder_loss_weight"]
     model.forward = types.MethodType(forward, model)
     model = model.to(device=device, dtype=torch.bfloat16)
     
@@ -552,14 +547,13 @@ def toy_finetune(config, device, all_tokens, trial=None):
     
     # Setup training
     optimizer = AdamW(model.parameters(), lr=config["learning_rate"], weight_decay=config["weight_decay"])
-    scheduler = LinearLR(optimizer, total_iters=N_EPOCHS * len(trainloader))
+    scheduler = LinearLR(optimizer, total_iters=n_epochs * len(trainloader))
     
     # Training loop
     model.train()
     best_val_loss = float('inf')
     
-    for epoch in range(N_EPOCHS):
-        # Training
+    for epoch in range(n_epochs):
         train_losses = []
         for tokens, tokens_mask in tqdm(trainloader, desc=f"Epoch {epoch}"):
             tokens = tokens.to(device)
@@ -598,53 +592,31 @@ def toy_finetune(config, device, all_tokens, trial=None):
     
     return best_val_loss
 
-def objective(trial, device, all_tokens):
-    # Load sweep configuration
-    with open(SWEEP_CONFIG, "r") as f:
-        sweep_config = yaml.safe_load(f)
+with open("/path/to/tokenized/data.pkl", "rb") as f:
+    all_tokens = pickle.load(f)
 
-    # Sample hyperparameters
-    config = {}
-    for name, param in sweep_config.items():
-        if param["type"] == "categorical":
-            config[name] = trial.suggest_categorical(name, param["values"])
-        elif param["type"] == "float":
-            config[name] = trial.suggest_float(name, float(param["min"]), float(param["max"]), log=param["log"])
-        elif param["type"] == "int":
-            config[name] = trial.suggest_int(name, int(param["min"]), int(param["max"]))
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Run training and get validation loss
-    final_val_loss = toy_finetune(config, device, all_tokens, trial)
-    return final_val_loss
+# Create study and run optimization
+study = optuna.create_study(
+    study_name="csm-sweep",
+    direction="minimize",
+    pruner=optuna.pruners.MedianPruner()
+)
 
-if __name__ == "__main__":
-    # Load data
-    with open(DATA_PATH, "rb") as f:
-        all_tokens = pickle.load(f)
-    
-    # Setup device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # Create study
-    study = optuna.create_study(
-        study_name="toy_sweep",
-        direction="minimize",
-        pruner=optuna.pruners.MedianPruner()
-    )
-    
-    # Run optimization
-    study.optimize(
-        lambda trial: objective(trial, device, all_tokens),
-        n_trials=N_TRIALS
-    )
-    
-    # Save best configuration
-    with open(OUTPUT_DIR / "best_config.yaml", "w") as f:
-        yaml.safe_dump(study.best_trial.params, f, default_flow_style=False)
-    
-    print(f"Best trial:")
-    print(f"  Value: {study.best_trial.value}")
-    print(f"  Params: ")
-    for key, value in study.best_trial.params.items():
-        print(f"    {key}: {value}") 
+n_epochs = 3
+study.optimize(
+    lambda trial: objective(trial, device, all_tokens, n_epochs),
+    n_trials=50
+)
+
+# Save best configuration
+OUTPUT_DIR = Path("./sweep")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+with open(OUTPUT_DIR / "best_config.yaml", "w") as f:
+    yaml.safe_dump(study.best_trial.params, f, default_flow_style=False)
+
 ```
+
+
+### (Maybe) Results
