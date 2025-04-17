@@ -120,13 +120,14 @@ def forward(self, tokens: torch.Tensor, tokens_mask: torch.Tensor):
 
     c_loss = F.cross_entropy(c_logits.reshape(-1, c_logits.size(-1)), target_tokens.reshape(-1))
 
-    loss = c0_loss + c_loss
+    loss = 2 * ((1 - self.decoder_loss_weight) * c0_loss + self.decoder_loss_weight * c_loss)
     return loss
 
 
-def load_model(pretrained_model_name_or_path: Union[str, Path], device: Union[str, torch.device], checkpoint_path: Union[str, Path, None] = None):
+def load_model(pretrained_model_name_or_path: Union[str, Path], device: Union[str, torch.device], checkpoint_path: Union[str, Path, None] = None, decoder_loss_weight: float = 0.5):
     """Load the model with the forward method and move to device."""    
     model = Model.from_pretrained(pretrained_model_name_or_path)
+    model.decoder_loss_weight = decoder_loss_weight
     model.forward = types.MethodType(forward, model)  # add the forward method to the model
     if checkpoint_path:
         state_dict = torch.load(checkpoint_path)['model']

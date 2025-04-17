@@ -72,7 +72,7 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
     eff_batch_size = config["batch_size"] * config["grad_acc_steps"]
     
     # Load / create: model, tokenizers, dataloaders, optimizer, scheduler, and grad scaler.
-    model = load_model(args.model, device)
+    model = load_model(args.model, device, decoder_loss_weight=config["decoder_loss_weight"])
     text_tokenizer, audio_tokenizer = load_tokenizers(device)
     trainloader, valloader = create_dataloaders(
         all_tokens, 
@@ -204,7 +204,7 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
             step += 1
     
     pbar.close()
-    return val_loss
+    return state["best_val_loss"]
 
 
 if __name__ == "__main__":

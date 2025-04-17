@@ -91,9 +91,9 @@ def worker(args, gpu_id, study_name, storage_name, all_tokens):
             reinit=True,
         )
 
-        final_val_loss = finetune(args, config, device, all_tokens, trial)
+        best_val_loss = finetune(args, config, device, all_tokens, trial)
         wandb.finish()
-        return final_val_loss
+        return best_val_loss
     
     study.optimize(objective, n_trials=trials_per_worker)
 
@@ -113,13 +113,13 @@ def save_visualization(study):
     param_importance_fig.write_html(str(args.output_dir / "param_importance.html"))
     
     # Contour plots for pairs of parameters
-    try:
-        contour_fig = plot_contour(study, params=["learning_rate", "batch_size"])
-        contour_fig.write_html(str(args.output_dir / "lr_bsz_contour.html"))
-        contour_fig = plot_contour(study, params=["learning_rate", "weight_decay"])
-        contour_fig.write_html(str(args.output_dir / "lr_wd_contour.html"))
-    except:
-        print("Could not create contour plot")
+    parameter_pairs = [["learning_rate", "batch_size"], ["learning_rate", "decoder_loss_weight"], ["learning_rate", "weight_decay"], ["learning_rate", "max_grad_norm"]]
+    for pair in parameter_pairs:
+        try:
+            contour_fig = plot_contour(study, params=pair)
+            contour_fig.write_html(str(args.output_dir / f"{pair[0]}_{pair[1]}_contour.html"))
+        except:
+            print(f"Could not create contour plot for {pair[0]} and {pair[1]}")
 
 
 if __name__ == "__main__":
