@@ -82,7 +82,7 @@ def worker(args, gpu_id, study_name, storage_name, all_tokens):
             elif param["type"] == "int":
                 config[name] = trial.suggest_int(name, int(param["min"]), int(param["max"]))
             elif param["type"] == "fixed":
-                config[name] = eval(param["value"])
+                config[name] = param["value"]
         
         wandb.init(
             project=args.wandb_project,
