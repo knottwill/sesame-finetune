@@ -9,6 +9,7 @@ import plotly
 import wandb
 import torch
 import torch.multiprocessing as mp
+import gc
 
 from finetune import finetune
 
@@ -95,6 +96,10 @@ def worker(args, gpu_id, study_name, storage_name, all_tokens):
 
         best_val_loss = finetune(args, config, device, all_tokens, trial)
         wandb.finish()
+        
+        torch.cuda.empty_cache()
+        gc.collect()
+        
         return best_val_loss
     
     study.optimize(objective, n_trials=trials_per_worker)

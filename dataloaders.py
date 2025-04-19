@@ -43,7 +43,7 @@ def collate_fn(batch: List[dict]):
         audio_frame_mask[:, :-1] = True
 
         text_frame = torch.zeros(len(text_tokens), n_codebooks + 1).long()
-        text_frame[:, -1] = torch.tensor(text_tokens)
+        text_frame[:, -1] = text_tokens
         text_frame_mask = torch.zeros(len(text_tokens), n_codebooks + 1).bool()
         text_frame_mask[:, -1] = True
 

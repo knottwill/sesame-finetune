@@ -4,7 +4,6 @@ batch_size:
     - 8
     - 16
     - 32
-    - 64
 
 learning_rate:
   type: float
