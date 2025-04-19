@@ -1,4 +1,4 @@
-# How to Finetune Sesame AI's Speech Model in New Languages and Voices.
+![Cover](media/cover.png)
 
 Sesame AI recently stirred up a lot hype with their open source ultra-realistic [conversational speech model (CSM)](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo), but they did not open source their training code and it only comes in a handful of english voices. This blog will teach you how to finetune it on new languages and voices.
 
@@ -8,7 +8,7 @@ Specifically, you will learn:
 - How to sweep finetuning hyperparameters (using Optuna).
 - How to actually finetune the model.
 
-If you don't care about any of the technical details and want to jump straight into finetuning on your own datasets, please clone the accompanying [GitHub repo](https://github.com/knottwill/sesame-finetune.git) and follow the `README.md`. You only need to use the following 3 commands:
+If you don't care about any of the technical details and want to jump straight into finetuning on your own datasets, please clone the accompanying [GitHub repo](https://github.com/knottwill/sesame-finetune.git) and follow the `README.md`. You will only need the following 3 commands:
 
 ```bash
 # Pre-tokenize data (for efficient training)
@@ -21,39 +21,70 @@ python sweep.py --data /path/to/tokenized/data.pkl --sweep_config ./configs/swee
 python finetune.py --data /path/to/tokenized/data.pkl --config ./configs/default.yaml --n_epochs 25 --gen_every 500 --gen_sentence "Marie aime les pommes et les poires." --wandb_api_key WANDB_API_KEY
 ```
 
-I am going to assume some knowledge of deep learning, generative models, and implementation of these things in PyTorch. 
+In what follows I will be assuming basic knowledge of deep learning, generative models, and implementation in PyTorch. 
+
+## Contents
+
+1. [Theory](#theory)
+2. [Implementation](#implementation)
+   - Installation 
+   - Dataset Preparation
+   - Training Pipeline
+   - Hyperparameter Optimization
+3. [Closing Thoughts](#closing-thoughts)
+
 
 ## Theory
 
 Before we jump into implementation, I want to quickly summarise the architecture and clarify some technical points that are relevant for finetuning. I also recommend reading the [official blog post](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo), which gives a great description of the model.
 
-Much like many contemporary generative models of audio, images, and video, Sesame's CSM is an autoregressive transformer that operates in the latent space of a pre-trained autoencoder. In particular, it operates on discrete audio tokens encoded by the [Mimi split-RVQ tokenizer](https://arxiv.org/html/2410.00037v2) (as well as text tokenized by the [Llama tokenizer](https://huggingface.co/meta-llama/Llama-3.2-1B)). There are two main reasons why this typically works better than using "raw" audio. Firstly, only a small fraction of raw audio content is actually perceptable to humans and the rest is noise. Discrete audio tokenizers like Mimi are good at retaining just the perceptable signal, allowing the generative model to focus purely on what "matters". Secondly, autoregressive transformers generally work better on discrete inputs (there is just something special about cross entropy loss). 
+Much like many contemporary generative models of audio, images, and video, Sesame's CSM is an autoregressive transformer that operates in the latent space of a pre-trained autoencoder. In particular, it operates on discrete audio tokens encoded by the [Mimi split-RVQ tokenizer](https://arxiv.org/html/2410.00037v2). There are two main reasons why this typically works better than using "raw" audio. Firstly, only a small fraction of raw audio content is actually perceptable to humans and the rest is noise. Discrete audio tokenizers like Mimi are good at retaining just the perceptable signal, allowing the generative model to focus purely on what "matters". Secondly, autoregressive transformers generally work better on discrete inputs (there is just something special about cross entropy loss). 
 
-We don't really need to understand Mimi in depth since Sesame uses it as-is, but to quickly summarise:
+Text is tokenized by the [Llama tokenizer](https://huggingface.co/meta-llama/Llama-3.2-1B), and speaker information is incorporated by simply prepending a speaker ID to the text prior to tokenization (e.g. `"[3]I am so hungry right now"` if the corresponding audio is spoken by speaker 3).
+
+
+**Mimi audio tokenizer**
+
+Feel free to skip this section as we will be using Mimi as-is and don't really need to understand it in depth. To quickly summarise:
 - An encoder splits the audio signal into frames, passes each frame through a convolutional neural network and a transformer to produce a continuous latent vector for each frame.
-- The latent vector is quantized into tokens by residual vector quantization. Read about RVQ [here](https://www.assemblyai.com/blog/what-is-residual-vector-quantization).
-- The decoder passes the RVQ tokens through an inverse quanitzation process and a transformer and CNN to reconstruct the audio waveform. 
+- The latent vector is quantized using split residual vector quantization, which works by quantizing the raw latent vector with a semantic VQ codebook and iteratively quantizing the residual error from each previous quantization step with a multi-level RVQ. The semantic codebook is trained with a cosine similarity loss against WavLM embeddings to capture phonetic information, while the RVQ codebooks capture acoustic details. This split architecture allows better separation of semantic and acoustic information compared to standard RVQ. Read more about RVQ [here](https://www.assemblyai.com/blog/what-is-residual-vector-quantization) and split-RVQ in the [official paper](https://arxiv.org/html/2410.00037v2).
+- The decoder passes the RVQ tokens through an inverse quanitzation process, then a transformer and CNN to reconstruct the audio waveform. 
 
-![Mimi](media/mimi.png)
+<div style="text-align: center">
+  <img src="media/mimi.png" alt="Mimi">
+  <p><em>Schematic of the Mimi split-RVQ tokenizer architecture.</em></p>
+</div>
 
-The architecture of Sesame's CSM-1B is given by a 1B transformer backbone and 100M transformer decoder, both of which are variants of the Llama architecture. Speaker information is incorporated by simply pre-pending a speaker ID to the text prior to tokenization (e.g. `"[3]I am so hungry right now"` if the corresponding audio is spoken by speaker 3). The input to the backbone is interleaved audio and text tokens. I highly suspect that the motivation for this is that Sesame wanted their model to sound really conversational, so they would have trained on a large amount of conversational data and then the training data might look something like:
+**CSM-1B architecture**
+
+Sesame trained 3 models (CSM-1B, CSM-3B, CSM-8B) then open-sourced only their smallest: CSM-1B. This is likely not the model used for their impressive demos, but it is still a very strong TTS model. 
+
+CSM-1B consists of a 1B transformer backbone and 100M transformer decoder, both of which are variants of the Llama architecture. The input to the backbone is interleaved audio and text tokens. I highly suspect that the motivation for this is that Sesame wanted their model to sound really conversational, so they would have trained on a large amount of conversational data and each training example might look something like:
 
 ```python
 ["[1]Hey, how's it going?", audio_from_speaker_1, "[5]Going well thanks, you?", audio_from_speaker_5]
 ```
 
-Once we have our interleaved tokens, we use the following procedure to get our prediction:
-- The backbone operates directly on these tokens, producing an enbedding `h` at each audio token position which is used to predict the next audio frame:
-- A single linear map is applied to the embedding `h` to predict the zeroth codebook (which is the 'semantic' codebook).
+Once we have our interleaved tokens, we use the following procedure to obtain a prediction:
+- The backbone operates directly on these tokens, producing an enbedding `h` at each audio token position which is used to predict the next audio frame.
+- A single linear map is applied to the embedding `h` to predict the zeroth codebook (the semantic codebook).
 - The decoder operates on the backbone embedding `h` and all N codebooks and predicts the N - 1 acoustic codebooks.
 
-![architecture](media/csm_architecture.png)
+<div style="text-align: center">
+  <img src="media/csm_architecture.png" alt="CSM Architecture">
+  <p><em>Schematic of Sesame's CSM model showing the backbone and decoder transformer.</em></p>
+</div>
 
-*Compute amortization*: The audio decoder is processing an effective batch size of `batch_size x sequence_length x num_codebooks`, which is a high memory burden and thus it significantly slows training and limits model scaling. To address this, the audio decoder is only trained on a random 1/16 subset of the audio frame, but the zeroth codebook is trained on every frame.
+**Training**
 
-![amortization](media/compute_amortization.png)
+*Compute amortization*: The audio decoder is processing an effective batch size of `batch_size x sequence_length x num_codebooks`, which is a high memory burden and thus it significantly slows training and limits model scaling. To address this, the decoder is only trained on a random 1/16 subset of the audio frames, but the zeroth codebook is trained on every frame.
 
-*Loss:* Sesame did not release all the details of their training procedure, but since we are using discrete tokens it is a safe assumption that the model is trained using cross entropy loss.
+<div style="text-align: center">
+  <img src="media/compute_amortization.png" alt="Compute Amortization">
+  <p><em>Schematic of compute amortization: only a subset of frames are used to train the decoder.</em></p>
+</div>
+
+Sesame did not release all the details of their training procedure, but since we are using discrete tokens it is a safe assumption that the model is trained using cross entropy loss. As mentionned, the backbone alone is enough to predict the zeroth codebook, then the decoder predicts the remaining $N-1$ codebooks. Theoretically, we could detach the decoder's input from the computational graph such that the backbone and decoder are trained separately, but I think it is also a safe assumption that they are trained concurrently. 
 
 ## Implementation
 
@@ -83,7 +114,7 @@ from generator import Generator
 
 ### 2. Data Set-up and Pre-tokenization
 
-Unsurprisingly, you will need a dataset to finetune on. Prepare your dataset with train set and validation set metadata files where each entry contains: the path to an audio file (must be `.wav`), the text transcription, start / end times of the transcription in the wav file (optional), and the speaker ID (optional). An example `metadata.json` file might look like:
+Unsurprisingly, you will need a dataset to finetune on. Prepare your dataset with train set and validation set metadata files where each entry contains: the path to an audio wav file, the text transcription, start / end times of the transcription in the wav file (optional), and the speaker ID (optional). An example `metadata.json` file might look like:
 
 ```json
   {
@@ -105,9 +136,9 @@ Unsurprisingly, you will need a dataset to finetune on. Prepare your dataset wit
 
 The sesame CSM uses the pre-trained Mimi audio tokenizer and Llama3 text tokenizer as they come. Since we will likely want to do multiple training runs and train for multiple epochs on each run, it is more computationally efficient to tokenize and save out all our data before starting training (then we can reuse them for multiple runs). 
 
-We can load our tokenizers like so:
-
 <details>
+
+We can load our tokenizers like so:
 
 ```python
 from huggingface_hub import hf_hub_download
@@ -126,11 +157,7 @@ def load_tokenizers(device):
     return text_tokenizer, audio_tokenizer
 ```
 
-</details><br>
-
 To tokenize our dataset using a `metadata.json` file, we can use:
-
-<details>
 
 ```python
 import pandas as pd 
@@ -166,8 +193,6 @@ def get_tokens(data_path, audio_tokenizer, text_tokenizer, device):
     return audio_tokens, text_tokens
 ```
 
-</details><br>
-
 Finally we pre-tokenize and save the train and validation sets. Tokenized text is represented by a list of token ids, whereas the tokenized representation of an audio sample is an array of shape N x S containing token ids from the Mimi tokenizer codebooks, where N is the number of codebooks and S is the sequence length.
 
 ```python
@@ -188,11 +213,15 @@ with open("/path/to/tokenized/data.pkl", "wb") as f:
     pickle.dump(all_tokens, f)
 ```
 
+</details>
+
 ### 3. Dataloaders
 
-Now we have our pre-tokenized data, we will build our dataloaders. We will start by creating a simple self-explanatory dataset class:
+Now we have our pre-tokenized data, we will build our dataloaders.
 
-<details>
+<details><br>
+
+Lets start by creating a simple self-explanatory dataset class:
 
 ```python
 from typing import List
@@ -211,13 +240,7 @@ def __getitem__(self, index: int):
 	return {"audio": self.audio_tokens[index], "text": self.text_tokens[index]}
 ```
 
-</details><br>
-
-Next we will write a collation function for the dataloader.
-
-<details>
-
-The collate function:
+Next we will write a collation function for the dataloader. This:
 - Accepts a list of dictionaries returned by `TokenizedDataset.__getitem__`
 - Appends an EOS frame to the audio tokens
 - Appends an extra dimension to the audio tokens to account for text tokens
@@ -261,15 +284,11 @@ def collate_fn(batch: List[dict]):
     tokens = pad_sequence(tokens, batch_first=True)
     tokens_mask = pad_sequence(tokens_mask, batch_first=True, padding_value=False)
 
-    # [batch_size, max_seq_len, n_codebooks+1]
+    # both: [batch_size, max_seq_len, n_codebooks+1]
     return tokens, tokens_mask
 ```
 
-</details><br>
-
-We will also make a sampler object that minimizes padding in batches by grouping samples with similar lengths. 
-
-<details>
+We will also make a sampler object that minimizes padding in batches by grouping samples with similar lengths:
 
 ```python
 class BucketSampler(torch.utils.data.sampler.Sampler):
@@ -325,11 +344,8 @@ class BucketSampler(torch.utils.data.sampler.Sampler):
     def __len__(self):
         return len(self.bins)
 ```
-</details><br>
 
 Finally we can create our dataloaders:
-
-<details>
 
 ```python
 def create_dataloaders(all_tokens: dict, batch_size: int, infinite_train: bool = False):
@@ -361,7 +377,7 @@ def create_dataloaders(all_tokens: dict, batch_size: int, infinite_train: bool =
     return trainloader, valloader
 ```
 
-</details><br>
+</details>
 
 ### 4. Forward pass
 
@@ -440,9 +456,8 @@ def forward(self, tokens: torch.Tensor, tokens_mask: torch.Tensor):
     loss = (1 - self.decoder_loss_weight) * c0_loss + self.decoder_loss_weight * c_loss
     return loss
 ```
-</details><br>
 
-We can add a custom forward function with:
+We can add this custom forward function with:
 
 ```python
 import types
@@ -458,9 +473,11 @@ def load_model(pretrained_model_name_or_path, device, decoder_loss_weight):
     return model
 ```
 
+</details>
+
 ### 5. Training 
 
-We now have all the elements to write our training pipeline. Below is an extremely simple training pipeline for illustration purposes only. We **highly** recommend referring to the [GitHub repo](https://github.com/knottwill/sesame-finetune.git), which implements various useful techniques such as gradient clipping, gradient accumulation, mixed precision training, better learning rate scheduling, experiment tracking with Wandb, logging of validation and generations etc.
+We now have all the elements to write our training pipeline. Below is an extremely simple training pipeline for illustration purposes only. I **highly** recommend referring to the [GitHub repo](https://github.com/knottwill/sesame-finetune.git), which implements various useful techniques such as gradient clipping, gradient accumulation, mixed precision training, better learning rate scheduling, experiment tracking with Wandb, logging of validation and generations etc.
 
 ```python
 import os
@@ -480,6 +497,7 @@ output_dir.mkdir(parents=True, exist_ok=True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# Define finetuning config
 config = {
     "batch_size": 8,
     "learning_rate": 3e-5,
@@ -487,6 +505,7 @@ config = {
     "decoder_loss_weight": 0.5,
 }
 
+# Load tokenized data
 with open("/path/to/tokenized/data.pkl", "rb") as f:
     all_tokens = pickle.load(f)
 
@@ -514,7 +533,7 @@ for epoch in range(n_epochs):
 
 ### (Optional) Hyperparameter Optimization
 
-Successful finetuning of the CSM is fairly sensitive to the choice of hyperparameters, hence it is wise to sweep hyperparameters before the main finetuning run. I recommend using [my script](https://github.com/knottwill/sesame-finetune/blob/main/sweep.py) to perform this sweep, which offers:
+Successful finetuning of the CSM is fairly sensitive to the choice of hyperparameters, hence it is wise to sweep hyperparameters before the main finetuning run. I recommend using [this script](https://github.com/knottwill/sesame-finetune/blob/main/sweep.py) to perform the sweep, which offers:
 - Parallelism of trials across multiple devices or within a single device.
 - Logging of trials to Weights & Biases for comparison. For example: 
 
@@ -528,11 +547,11 @@ Successful finetuning of the CSM is fairly sensitive to the choice of hyperparam
 
         <img src="media/importances.png" alt="importances" width="600"/>
 
-We use the [Optuna](https://optuna.org/) package for sweeping hyperparameters, which has two particularly useful features:
+We use the [Optuna](https://optuna.org/) package for sweeping hyperparameters, which offers two particularly useful features:
 - Efficient searching of hyperparameter space using the Tree-structured Parzen Estimator algorithm. 
-- Pruning: Stop unpromising trials early in training on some rule. Below our stopping rule is that a trial is pruned if the intermediate validation loss is worse than the median of previous trials at the same step. 
+- Pruning of unpromising trials early in training based on some stopping rule. Below our stopping rule is that a trial is pruned if the intermediate validation loss is worse than the median of previous trials at the same step. 
 
-For illustration purposes only, below is a simplified version of this script:
+For illustration purposes only, below is a simplified version of the sweep script:
 
 ```python
 import os
@@ -595,10 +614,9 @@ def objective(trial, device, all_tokens, n_epochs):
             best_val_loss = val_loss
         
         # Report to Optuna for pruning
-        if trial is not None:
-            trial.report(val_loss, epoch)
-            if trial.should_prune():
-                raise optuna.exceptions.TrialPruned()
+        trial.report(val_loss, epoch)
+        if trial.should_prune():
+            raise optuna.exceptions.TrialPruned()
         
         model.train()
     
@@ -629,3 +647,14 @@ with open(OUTPUT_DIR / "best_config.yaml", "w") as f:
     yaml.safe_dump(study.best_trial.params, f, default_flow_style=False)
 
 ```
+
+## Closing thoughts
+
+In this blog post, we explored:
+
+- The model architecture, including the Mimi tokenizer and how it trains efficiently.
+- How to prepare and pre-tokenize a dataset for finetuning.
+- Implementation of efficient training with bucketed sampling and compute amortization.
+- Hyperparameter optimization using Optuna.
+
+Feel free to open issues on the GitHub repo if you run into any problems. Happy finetuning!
