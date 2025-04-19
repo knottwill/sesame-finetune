@@ -19,7 +19,10 @@ Annoyingly, the [CSM repo](https://github.com/SesameAILabs/csm) is not set up to
 
 ```bash
 git clone https://github.com/SesameAILabs/csm.git ~/csm
+cd ~/csm
+git checkout 836f886515f0dec02c22ed2316cc78904bdc0f36
 export CSM_PATH='~/csm'
+cd - # return to sesame-finetune
 echo "export CSM_PATH='~/csm'" >> .venv/bin/activate
 ```
 
