@@ -1,14 +1,14 @@
 ![Cover](media/cover.png)
 
-Sesame AI recently stirred up a lot hype with their open source ultra-realistic [conversational speech model (CSM)](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo), but they did not open source their training code and it only comes in a handful of english voices. This blog will teach you how to finetune it on new languages and voices.
+Sesame AI has stirred up a huge amount of hype with their open source and ultra-realistic [conversational speech model (CSM)](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo). Unfortunately, they did not open source their training code and the model only comes with a handful of English voices. This blog will teach you how to finetune this model on any new langauge or voice you would like!
 
-Specifically, you will learn:
+In this blogpost, I will cover:
 - How the model works.
 - How to prepare a finetuning dataset.
 - How to sweep finetuning hyperparameters (using Optuna).
 - How to actually finetune the model.
 
-If you don't care about any of the technical details and want to jump straight into finetuning on your own datasets, please clone the accompanying [GitHub repo](https://github.com/knottwill/sesame-finetune.git) and follow the `README.md`. You will only need the following 3 commands:
+If you're not fussed with the technical details, and would like to jump straight into finetuning on your own datasets, you can do this by cloning the accompanying [GitHub repo](https://github.com/knottwill/sesame-finetune.git). You will only need the following 3 commands:
 
 ```bash
 # Pre-tokenize data (for efficient training)
@@ -21,7 +21,7 @@ python sweep.py --data /path/to/tokenized/data.pkl --sweep_config ./configs/swee
 python finetune.py --data /path/to/tokenized/data.pkl --config ./configs/default.yaml --n_epochs 25 --gen_every 500 --gen_sentence "Marie aime les pommes et les poires." --wandb_api_key WANDB_API_KEY
 ```
 
-In what follows I will be assuming basic knowledge of deep learning, generative models, and implementation in PyTorch. 
+In what follows, I will be assuming a basic knowledge of deep learning, generative models, and PyTorch. 
 
 ## Contents
 
@@ -36,16 +36,16 @@ In what follows I will be assuming basic knowledge of deep learning, generative 
 
 ## Theory
 
-Before we jump into implementation, I want to quickly summarise the architecture and clarify some technical points that are relevant for finetuning. I also recommend reading the [official blog post](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo), which gives a great description of the model.
+Before we jump straight into implementation, I would like to quickly summarise the CSM architecture as well as clarify some technical points that are relevent for finetuning. I would also recommend reading the [official blog post](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo), which provides a great description and demo of the model. 
 
-Much like many contemporary generative models of audio, images, and video, Sesame's CSM is an autoregressive transformer that operates in the latent space of a pre-trained autoencoder. In particular, it operates on discrete audio tokens encoded by the [Mimi split-RVQ tokenizer](https://arxiv.org/html/2410.00037v2). There are two main reasons why this typically works better than using "raw" audio. Firstly, only a small fraction of raw audio content is actually perceptable to humans and the rest is noise. Discrete audio tokenizers like Mimi are good at retaining just the perceptable signal, allowing the generative model to focus purely on what "matters". Secondly, autoregressive transformers generally work better on discrete inputs (there is just something special about cross entropy loss). 
+Like many contemporary generative audio, image, and video models, Sesame's CSM is an autoregressive transformer which operates in the latent space of a pre-trained autoencoder. In particular, it operates on discrete audio tokens encoded by the [Mimi split-RVQ tokenizer](https://arxiv.org/html/2410.00037v2). There are two main reasons why this typically works better than using "raw" audio. Firstly, only a small fraction of raw audio content is actually perceptable to humans whilst the rest is noise. Discrete audio tokenizers like Mimi are very good at retaining just the perceptable signal, which allows the generative model to focus purely on what "matters". Secondly, autoregressive transformers generally work better on discrete inputs; there is just something special about cross entropy loss!
 
-Text is tokenized by the [Llama tokenizer](https://huggingface.co/meta-llama/Llama-3.2-1B), and speaker information is incorporated by simply prepending a speaker ID to the text prior to tokenization (e.g. `"[3]I am so hungry right now"` if the corresponding audio is spoken by speaker 3).
+Text is tokenized by the [Llama tokenizer](https://huggingface.co/meta-llama/Llama-3.2-1B), and the speaker information is incorporated by prepending a speaker ID to the text, prior to tokenization. For instance, we would tokenize `"[3]I am so hungry right now"` if the corresponding audio is spoken by speaker 3.
 
 
 **Mimi audio tokenizer**
 
-Feel free to skip this section as we will be using Mimi as-is and don't really need to understand it in depth. To quickly summarise:
+We don't really need to understand Mimi in depth as we will be using the pretrained model as-is (so feel free to skip this section), but to quickly summarise:
 - An encoder splits the audio signal into frames, passes each frame through a convolutional neural network and a transformer to produce a continuous latent vector for each frame.
 - The latent vector is quantized using split residual vector quantization, which works by quantizing the raw latent vector with a semantic VQ codebook and iteratively quantizing the residual error from each previous quantization step with a multi-level RVQ. The semantic codebook is trained with a cosine similarity loss against WavLM embeddings to capture phonetic information, while the RVQ codebooks capture acoustic details. This split architecture allows better separation of semantic and acoustic information compared to standard RVQ. Read more about RVQ [here](https://www.assemblyai.com/blog/what-is-residual-vector-quantization) and split-RVQ in the [official paper](https://arxiv.org/html/2410.00037v2).
 - The decoder passes the RVQ tokens through an inverse quanitzation process, then a transformer and CNN to reconstruct the audio waveform. 
@@ -57,7 +57,7 @@ Feel free to skip this section as we will be using Mimi as-is and don't really n
 
 **CSM-1B architecture**
 
-Sesame trained 3 models (CSM-1B, CSM-3B, CSM-8B) then open-sourced only their smallest: CSM-1B. This is likely not the model used for their impressive demos, but it is still a very strong TTS model. 
+Sesame trained 3 models (CSM-1B, CSM-3B, CSM-8B) but only open-sourced their smallest, the CSM-1B. Though this is likely not the model used for their impressive demos, it is still a very strong TTS model. 
 
 CSM-1B consists of a 1B transformer backbone and 100M transformer decoder, both of which are variants of the Llama architecture. The input to the backbone is interleaved audio and text tokens. I highly suspect that the motivation for this is that Sesame wanted their model to sound really conversational, so they would have trained on a large amount of conversational data and each training example might look something like:
 
