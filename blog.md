@@ -1,14 +1,16 @@
 ![Cover](media/cover.png)
 
-Sesame AI has stirred up a huge amount of hype with their open source and ultra-realistic [conversational speech model (CSM)](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo). Unfortunately, they did not open source their training code and the model only comes with a handful of English voices. This blog will teach you how to finetune this model on any new langauge or voice you would like!
+Sesame AI has recently stirred up a huge amount of hype with their open source and ultra-realistic [conversational speech model (CSM)](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo). Unfortunately, they did not open source their training code and the model only comes with a handful of English voices. This blog will teach you how to finetune this model on any new langauge or voice you would like!
+
+Since we will be fine-tuning into new languages, we will be modifying the original weights rather than using efficient fine-tuning techniques like LoRA.
 
 In this blogpost, I will cover:
 - How the model works.
-- How to prepare a finetuning dataset.
-- How to sweep finetuning hyperparameters (using Optuna).
+- How to prepare a fine-tuning dataset.
+- How to sweep fine-tuning hyperparameters (using Optuna).
 - How to actually finetune the model.
 
-If you're not fussed with the technical details, and would like to jump straight into finetuning on your own datasets, you can do this by cloning the accompanying [GitHub repo](https://github.com/knottwill/sesame-finetune.git). You will only need the following 3 commands:
+If you're not fussed with the technical details, and would like to jump straight into fine-tuning on your own datasets, you can do this by cloning the accompanying [GitHub repo](https://github.com/knottwill/sesame-finetune.git). You will only need the following 3 commands:
 
 ```bash
 # Pre-tokenize data (for efficient training)
@@ -36,7 +38,7 @@ In what follows, I will be assuming a basic knowledge of deep learning, generati
 
 ## Theory
 
-Before we jump straight into implementation, I would like to quickly summarise the CSM architecture as well as clarify some technical points that are relevent for finetuning. I would also recommend reading the [official blog post](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo), which provides a great description and demo of the model. 
+Before we jump straight into implementation, I would like to quickly summarise the CSM architecture as well as clarify some technical points that are relevent for fine-tuning. I would also recommend reading the [official blog post](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice#demo), which provides a great description and demo of the model. 
 
 Like many contemporary generative audio, image, and video models, Sesame's CSM is an autoregressive transformer which operates in the latent space of a pre-trained autoencoder. In particular, it operates on discrete audio tokens encoded by the [Mimi split-RVQ tokenizer](https://arxiv.org/html/2410.00037v2). There are two main reasons why this typically works better than using "raw" audio. Firstly, only a small fraction of raw audio content is actually perceptable to humans whilst the rest is noise. Discrete audio tokenizers like Mimi are very good at retaining just the perceptable signal, which allows the generative model to focus purely on what "matters". Secondly, autoregressive transformers generally work better on discrete inputs; there is just something special about cross entropy loss!
 
@@ -88,7 +90,7 @@ Sesame did not release all the details of their training procedure, but since we
 
 ## Implementation
 
-Now we have an understanding of the model and training procedure, lets look at how to implement the finetuning pipeline. Most TTS datasets are not conversational, hence to make this tutorial as compatible as possible with *your* data, we will not be interleaving text and audio as described above. However, I would definitely recommend doing this if you have conversational data.
+Now we have an understanding of the model and training procedure, lets look at how to implement the fine-tuning pipeline. Most TTS datasets are not conversational, hence to make this tutorial as compatible as possible with *your* data, we will not be interleaving text and audio as described above. However, I would definitely recommend doing this if you have conversational data.
 
 ### 1. Installation
 
@@ -497,7 +499,7 @@ output_dir.mkdir(parents=True, exist_ok=True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Define finetuning config
+# Define fine-tuning config
 config = {
     "batch_size": 8,
     "learning_rate": 3e-5,
@@ -533,7 +535,7 @@ for epoch in range(n_epochs):
 
 ### (Optional) Hyperparameter Optimization
 
-Successful finetuning of the CSM is fairly sensitive to the choice of hyperparameters, hence it is wise to sweep hyperparameters before the main finetuning run. I recommend using [this script](https://github.com/knottwill/sesame-finetune/blob/main/sweep.py) to perform the sweep, which offers:
+Successful fine-tuning of the CSM is fairly sensitive to the choice of hyperparameters, hence it is wise to sweep hyperparameters before the main fine-tuning run. I recommend using [this script](https://github.com/knottwill/sesame-finetune/blob/main/sweep.py) to perform the sweep, which offers:
 - Parallelism of trials across multiple devices or within a single device.
 - Logging of trials to Weights & Biases for comparison. For example: 
 
@@ -653,8 +655,8 @@ with open(OUTPUT_DIR / "best_config.yaml", "w") as f:
 In this blog post, we explored:
 
 - The model architecture, including the Mimi tokenizer and how it trains efficiently.
-- How to prepare and pre-tokenize a dataset for finetuning.
+- How to prepare and pre-tokenize a dataset for fine-tuning.
 - Implementation of efficient training with bucketed sampling and compute amortization.
 - Hyperparameter optimization using Optuna.
 
-Feel free to open issues on the GitHub repo if you run into any problems. Happy finetuning!
+Feel free to open issues on the GitHub repo if you run into any problems. Happy fine-tuning!
