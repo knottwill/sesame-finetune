@@ -6,9 +6,9 @@
 
 # Finetune Sesame AI's Conversational Speech Model.
 
-Use this repository to finetune Sesame's CSM-1B into new languages or voices. [Read blog post here.](https://blog.speechmatics.com/sesame-finetune)
+Use this repository to finetune Sesame's CSM-1B into new languages or voices. [Read blog post here.](https://blog.speechmatics.com/sesame-finetune) This repo could also be easily adapted to train the model from scratch.
 
-Some features of this repo:
+Features:
 - Pre-tokenization, compute amortization, and padding-minimized batching for efficient training.
 - Finetune by modifying the original weights (as opposed to LoRA). This has a higher compute burden but is much better for significant domain shifts like new languages.
 - Training hyperparameter optimization using Optuna. 
