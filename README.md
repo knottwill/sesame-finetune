@@ -1,8 +1,8 @@
-![Cover](media/cover.png)
-
 <h1 align="center">
     <img src="media/speechmatics_logo.png" alt="Speechmatics" width="600">
 </h1>
+
+![Cover](media/cover.png)
 
 # Finetune Sesame AI's Conversational Speech Model.
 
