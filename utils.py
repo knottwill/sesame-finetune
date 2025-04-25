@@ -18,6 +18,9 @@ except ImportError:
     raise ImportError("CSM not found. Please set the CSM_PATH environment variable to the path of the CSM repo.")
 
 
+MIMI_SAMPLE_RATE = 24_000
+
+
 class WarmupDecayLR(LambdaLR):
     """
     Learning rate scheduler with a linear warmup and specificable decay.

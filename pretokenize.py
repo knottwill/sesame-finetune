@@ -22,7 +22,7 @@ from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 
 from csm.generator import load_llama3_tokenizer
 
-from utils import load_tokenizers
+from utils import load_tokenizers, MIMI_SAMPLE_RATE
 
 
 def parse_args(arg_string=None):
@@ -79,7 +79,7 @@ def get_tokens(
         audio_tensor, sample_rate = torchaudio.load(
             data_point["path"], frame_offset=frame_offset, num_frames=num_frames
         )
-        audio_tensor = torchaudio.functional.resample(audio_tensor.squeeze(0), orig_freq=sample_rate, new_freq=24_000)
+        audio_tensor = torchaudio.functional.resample(audio_tensor.squeeze(0), orig_freq=sample_rate, new_freq=MIMI_SAMPLE_RATE)
         audio_tensor = audio_tensor.unsqueeze(0).unsqueeze(0).to(device)
 
         # tokenize audio

@@ -18,7 +18,8 @@ from utils import (
     load_tokenizers, 
     generate_audio, 
     WarmupDecayLR,
-    validate
+    validate,
+    MIMI_SAMPLE_RATE
 )
 from dataloaders import create_dataloaders
 
@@ -189,7 +190,7 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
                     
                     wandb.log(
                         {
-                            f"audio_{i}": wandb.Audio(audio, sample_rate=24_000),
+                            f"audio_{i}": wandb.Audio(audio, sample_rate=MIMI_SAMPLE_RATE),
                             f"wer_{i}": wer,
                         },
                         step=step,
