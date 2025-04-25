@@ -14,7 +14,7 @@ Some features of this repo:
 - Training hyperparameter optimization using Optuna. 
 - Performance enhancements: Gradient clipping, accumulation, mixed precision training, advanced LR scheduling, experiment tracking.
 
-### Installation
+## Installation
 
 Clone the repo and set up a virtual environment:
 ```bash
@@ -38,7 +38,7 @@ echo "export CSM_PATH='~/csm'" >> .venv/bin/activate
 
 Now when we want to import code from the CSM repo we can use `sys.path.append(os.getenv("CSM_PATH", "~/csm"))`. 
 
-### Usage
+## Usage
 
 **Data preparation and pre-tokenization**
 
