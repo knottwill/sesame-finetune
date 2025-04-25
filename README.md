@@ -44,15 +44,11 @@ Prepare your dataset with train set and validation set metadata files with each 
     "path": "/data/utterance_0.wav",
   },
   {
-    "text": "At the time, Niagara Falls was a thriving community.",
-    "path": "/data/utterance_1.wav",
-  },
-  {
     "text": "and ten years later the Fort Worth and Rio Grande Railroad laid tracks in the county.",
     "path": "/data/long_audio.wav",
-    "start": 171.1,  # Start point (optional)
-    "end": 182.6,    # End point (optional)
-    "speaker": 30,   # Speaker id (optional)
+    "start": 171.1,
+    "end": 182.6,
+    "speaker": 30,
   },
 ```
 
@@ -72,8 +68,12 @@ python finetune.py --data /path/to/tokenized/data.pkl --config ./configs/default
 
 **(Optional) Hyperparameter sweep**
 
-To sweep finetuning hyperparameters, specify the path to the pre-tokenized data, an experiment directory, the number of epochs to run for each trial, the number of trials, and the number of GPUs (for parallelism of trials). You will also need to provide a Weights & Biases API key for comparing the sweeps. 
+To sweep finetuning hyperparameters, specify the path to the pre-tokenized data, an experiment directory, the number of epochs to run for each trial, the number of trials, and the number of GPUs (for parallelism of trials). 
 
 ```bash
 python sweep.py --data /path/to/tokenized/data.pkl --sweep_config ./configs/sweep.yaml --output_dir ./my-sweep --n_epochs 3 --n_trials 50 --n_gpus 2 --wandb_api_key WANDB_API_KEY
 ```
+
+You will also need to provide a Weights & Biases API key for comparing the sweeps, like so:
+
+![sweeps](media/sweep_tracking.png)
