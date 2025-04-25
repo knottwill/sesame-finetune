@@ -9,9 +9,6 @@ from moshi.models import loaders
 from pathlib import Path
 from typing import Union
 from torch.optim.lr_scheduler import LambdaLR
-# from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
-# from whisper.normalizers import EnglishTextNormalizer, BasicTextNormalizer
-# from torchmetrics.text import WordErrorRate
 
 try:
     sys.path.append(os.getenv("CSM_PATH", "~/csm"))
@@ -198,61 +195,3 @@ def validate(model, valloader, device, use_amp=True):
     
     avg_val_loss = sum(val_losses) / len(val_losses)
     return avg_val_loss
-
-
-# def compute_wer(audio, reference_text, sample_rate=24000, language="en"):
-#     """
-#     Compute Word Error Rate (WER) for a given audio and reference text.
-    
-#     Args:
-#         audio: Audio as a numpy array or torch tensor
-#         reference_text: Ground truth transcription
-#         sample_rate: Sample rate of the audio (default: 24000)
-        
-#     Returns:
-#         float: Word Error Rate (WER)
-#     """
-#     # Convert torch tensor to numpy if needed
-#     if isinstance(audio, torch.Tensor):
-#         audio = audio.squeeze().cpu().numpy()
-
-#     device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-#     # Load ASR model
-#     model = AutoModelForSpeechSeq2Seq.from_pretrained(
-#         "openai/whisper-small", 
-#         torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-#         device_map=device
-#     )
-#     processor = AutoProcessor.from_pretrained("openai/whisper-small")
-    
-#     asr_pipeline = pipeline(
-#         "automatic-speech-recognition",
-#         model=model,
-#         tokenizer=processor.tokenizer,
-#         feature_extractor=processor.feature_extractor,
-#         torch_dtype=torch.float16 if device == "cuda" else torch.float32
-#     )
-    
-#     result = asr_pipeline({"raw": audio, "sampling_rate": sample_rate})
-#     recognized_text = result["text"]
-    
-#     # Choose appropriate normalizer based on language
-#     normalizer = BasicTextNormalizer()
-#     ref_normalized = normalize_text(reference_text, normalizer)
-#     rec_normalized = normalize_text(recognized_text, normalizer)
-    
-#     # Calculate WER using torchmetrics
-#     wer_metric = WordErrorRate()
-#     wer = wer_metric([rec_normalized], [ref_normalized]).item()
-    
-#     return wer, rec_normalized, ref_normalized
-
-
-# def normalize_text(text, normalizer):
-#     """Remove punctuation and normalize text."""
-#     remove_punc = string.punctuation.replace("'", "")  # keep apostrophes
-#     for punctuation in remove_punc:
-#         text = text.replace(punctuation, "")
-#     text = normalizer(text)
-#     return text.lower().strip()

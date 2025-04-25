@@ -4,6 +4,8 @@
 
 # Finetune Sesame AI's Conversational Speech Model.
 
+Use this repository to finetune Sesame's CSM-1B into new languages or voices. We finetune by modifying the original weights. This has a higher compute burden than using techniques like LoRA, but is much better when finetuning into a significantly different domain like a new language. [Read blog post here.](https://blog.speechmatics.com/2025/04/25/How-to-Finetune-Sesame-AIs-Speech-Model-on-New-Languages-and-Voices)
+
 ### Installation
 
 Clone the repo and set up a virtual environment:
@@ -58,18 +60,18 @@ Since we will want to train for several epochs, it is more efficient to pre-toke
 python pretokenize.py --train_data /path/to/train/metadata.json --val_data /path/to/val/metadata.json --output /path/to/tokenized/data.pkl
 ```
 
-**(Optional) Hyperparameter sweep**
-
-To perform a hyperparameter sweep, specify the path to the pre-tokenized data, an experiment directory, the number of epochs to run for each trial, the number of trials, and the number of GPUs (for parallelism of trials). You will also need to provide a Weights & Biases API key for comparing the sweeps. 
-
-```bash
-python sweep.py --data /path/to/tokenized/data.pkl --sweep_config ./configs/sweep.yaml --output_dir ./my-sweep --n_epochs 3 --n_trials 50 --n_gpus 2 --wandb_api_key WANDB_API_KEY
-```
-
 **Finetune**
 
-To finetune the model, you will need to provide the pre-tokenized data, a finetuning hyperparameters config file, a Weights & Biases API key to track the experiment, the number of epochs to train for, and what sentence to use when generating.
+To finetune the model, you will need to provide the pre-tokenized data, a finetuning hyperparameters config file, a Weights & Biases API key to track the experiment, the number of epochs to train for, and what sentence to use for generations. The script will generate every `--gen_every` steps, and log the resulting audio to Weights & Biases. 
 
 ```bash
 python finetune.py --data /path/to/tokenized/data.pkl --config ./configs/default.yaml --n_epochs 25 --gen_every 500 --gen_sentence "Marie aime les pommes et les poires." --wandb_api_key WANDB_API_KEY
+```
+
+**(Optional) Hyperparameter sweep**
+
+To sweep finetuning hyperparameters, specify the path to the pre-tokenized data, an experiment directory, the number of epochs to run for each trial, the number of trials, and the number of GPUs (for parallelism of trials). You will also need to provide a Weights & Biases API key for comparing the sweeps. 
+
+```bash
+python sweep.py --data /path/to/tokenized/data.pkl --sweep_config ./configs/sweep.yaml --output_dir ./my-sweep --n_epochs 3 --n_trials 50 --n_gpus 2 --wandb_api_key WANDB_API_KEY
 ```
