@@ -29,12 +29,7 @@ def parse_args(arg_string=None):
     parser.add_argument("--data", default="./data/tokens.pkl", type=str, help="Path to the pre-tokenized data")
     parser.add_argument("--output_dir", type=Path, default="./exp", help="Path to save the model")
     parser.add_argument("--config", type=str, default='./configs/default.yaml', help="Path to the finetuning config")
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="sesame/csm-1b",
-        help="Pretrained model name or local path",
-    )
+    parser.add_argument("--model", type=str, default="sesame/csm-1b", help="Pretrained model name or local path")
 
     parser.add_argument("--wandb_api_key", type=str, required=True)
     parser.add_argument("--wandb_project", type=str, default="csm-finetuning", help="Name of the project")
@@ -73,7 +68,7 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
     eff_batch_size = config["batch_size"] * config["grad_acc_steps"]
     
     # Load / create: model, tokenizers, dataloaders, optimizer, scheduler, and grad scaler.
-    model = load_model(args.model, device, decoder_loss_weight=config["decoder_loss_weight"])
+    model = load_model(device=device, pretrained_model_name_or_path=args.model, decoder_loss_weight=config["decoder_loss_weight"])
     text_tokenizer, audio_tokenizer = load_tokenizers(device)
     trainloader, valloader = create_dataloaders(
         all_tokens, 
@@ -178,7 +173,7 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
                         gen_sentences = f.readlines()
 
                 for i, sentence in enumerate(gen_sentences):
-                    audio, wer = generate_audio(
+                    audio = generate_audio(
                         model,
                         audio_tokenizer,
                         text_tokenizer,
@@ -191,7 +186,6 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
                     wandb.log(
                         {
                             f"audio_{i}": wandb.Audio(audio, sample_rate=MIMI_SAMPLE_RATE),
-                            f"wer_{i}": wer,
                         },
                         step=step,
                     )

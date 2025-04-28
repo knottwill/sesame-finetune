@@ -9,16 +9,21 @@ from moshi.models import loaders
 from pathlib import Path
 from typing import Union
 from torch.optim.lr_scheduler import LambdaLR
-
+from torch import nn
 try:
     sys.path.append(os.getenv("CSM_PATH", "~/csm"))
     from generator import Generator, load_llama3_tokenizer, load_watermarker
-    from models import Model, _create_causal_mask
+    from models import Model, ModelArgs, _create_causal_mask
 except ImportError:
     raise ImportError("CSM not found. Please set the CSM_PATH environment variable to the path of the CSM repo.")
 
 
 MIMI_SAMPLE_RATE = 24_000
+BACKBONE_FLAVOR = "llama-1B"
+DECODER_FLAVOR = "llama-100M"
+TEXT_VOCAB_SIZE = 128256
+AUDIO_VOCAB_SIZE = 2051
+AUDIO_NUM_CODEBOOKS = 32
 
 
 class WarmupDecayLR(LambdaLR):
@@ -52,7 +57,7 @@ def load_tokenizers(device: Union[str, torch.device]):
     text_tokenizer = load_llama3_tokenizer()
     mimi_weight = hf_hub_download(loaders.DEFAULT_REPO, loaders.MIMI_NAME)
     mimi = loaders.get_mimi(mimi_weight, device=device)
-    mimi.set_num_codebooks(32)
+    mimi.set_num_codebooks(AUDIO_NUM_CODEBOOKS)
     audio_tokenizer = mimi
     
     return text_tokenizer, audio_tokenizer
@@ -124,14 +129,65 @@ def forward(self, tokens: torch.Tensor, tokens_mask: torch.Tensor):
     return loss
 
 
-def load_model(pretrained_model_name_or_path: Union[str, Path], device: Union[str, torch.device], checkpoint_path: Union[str, Path, None] = None, decoder_loss_weight: float = 0.5):
-    """Load the model with the forward method and move to device."""    
-    model = Model.from_pretrained(pretrained_model_name_or_path)
+def init_weights(model: nn.Module):
+    """
+    Initialize the weights of the model.
+    - Xavier uniform initialization for linear layers
+    - Normal initialization for embeddings
+    - Xavier uniform initialization for parameters
+    """
+
+    def _init_weights(m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
+        elif isinstance(m, nn.Embedding):
+            nn.init.normal_(m.weight, mean=0.0, std=0.02)
+        elif isinstance(m, nn.Parameter):
+            nn.init.xavier_uniform_(m.data)
+
+    model.apply(_init_weights)
+
+    # Special handling for audio_head because it's nn.Parameter directly
+    nn.init.xavier_uniform_(model.audio_head)
+
+    return model
+
+def load_model(
+        device: Union[str, torch.device] = 'cuda',
+        pretrained_model_name_or_path: Union[str, Path] = None, 
+        checkpoint_path: Union[str, Path, None] = None, 
+        decoder_loss_weight: float = 0.5
+    ) -> Model:
+    """Load model, add forward method, and move to device.
+    
+    Args:
+        pretrained_model_name_or_path: Name or path of the pretrained model.
+        checkpoint_path: Path to a checkpoint file.
+        device: Device to move the model to.
+        decoder_loss_weight: Decoder loss weight.
+    """
+    if pretrained_model_name_or_path is not None:
+        model = Model.from_pretrained(pretrained_model_name_or_path)
+    else:
+        config = ModelArgs(
+            backbone_flavor="llama-1B",
+            decoder_flavor="llama-100M",
+            text_vocab_size=TEXT_VOCAB_SIZE,
+            audio_vocab_size=AUDIO_VOCAB_SIZE,
+            audio_num_codebooks=AUDIO_NUM_CODEBOOKS
+        )
+        model = Model(config)
+        model = init_weights(model)
+
     model.decoder_loss_weight = decoder_loss_weight
     model.forward = types.MethodType(forward, model)  # add the forward method to the model
+
     if checkpoint_path:
         state_dict = torch.load(checkpoint_path)['model']
         model.load_state_dict(state_dict)
+
     model = model.to(device=device, dtype=torch.bfloat16)
     return model
 
@@ -175,14 +231,9 @@ def generate_audio(model, audio_tokenizer, text_tokenizer, text, speaker_id, dev
             max_audio_length_ms=max_audio_length_ms,
         )
         audio = audio.squeeze().cpu().numpy()
-        try:
-            wer = compute_wer(audio, text, sample_rate=audio_tokenizer.sample_rate)
-        except Exception as e:
-            print(f"Error computing WER: {e}")
-            wer = None
     
     reset_caches(model)
-    return audio, wer
+    return audio
 
 
 def validate(model, valloader, device, use_amp=True):
