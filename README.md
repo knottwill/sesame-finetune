@@ -25,7 +25,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Annoyingly, the [CSM repo](https://github.com/SesameAILabs/csm) is not set up to be installable as a package (despite the `setup.py`), to use the code we need to manually clone the repo and add it to our `sys.path`. 
+The [CSM repo](https://github.com/SesameAILabs/csm) is not set up to be installable as a package (despite the `setup.py`). To use the code we need to manually clone the repo and add it to our `sys.path`. 
 
 ```bash
 git clone https://github.com/SesameAILabs/csm.git ~/csm

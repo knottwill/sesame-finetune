@@ -14,13 +14,9 @@ from typing import List, Tuple
 import pandas as pd
 import torch
 import torchaudio
-from huggingface_hub import hf_hub_download
-from moshi.models import loaders
 from torch import nn
 from tqdm import tqdm
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
-
-from csm.generator import load_llama3_tokenizer
 
 from utils import load_tokenizers, MIMI_SAMPLE_RATE
 
@@ -35,7 +31,7 @@ def parse_args(arg_string=None):
     return args
 
 
-def load_metadata(data_path: Path):
+def load_metadata(data_path: Path | str):
     """
     Metadata should have the following columns:
     - path: Path to the audio wav file.
@@ -46,6 +42,9 @@ def load_metadata(data_path: Path):
 
     Supported file formats: json, csv, sql, parquet, pkl. Feel free to add more.
     """
+    if isinstance(data_path, str):
+        data_path = Path(data_path)
+
     if data_path.suffix == ".json":
         return pd.read_json(data_path)
     elif data_path.suffix == ".csv":
