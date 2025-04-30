@@ -155,22 +155,19 @@ def init_weights(model: nn.Module):
     return model
 
 def load_model(
+        model_name_or_checkpoint_path: Union[str, Path] = None,
         device: Union[str, torch.device] = 'cuda',
-        pretrained_model_name_or_path: Union[str, Path] = None, 
-        checkpoint_path: Union[str, Path, None] = None, 
         decoder_loss_weight: float = 0.5
     ) -> Model:
     """Load model, add forward method, and move to device.
     
     Args:
-        pretrained_model_name_or_path: Name or path of the pretrained model.
-        checkpoint_path: Path to a checkpoint file.
+        model_name_or_checkpoint_path: Name or path of pretrained model or checkpoint.
         device: Device to move the model to.
         decoder_loss_weight: Decoder loss weight.
     """
-    if pretrained_model_name_or_path is not None:
-        model = Model.from_pretrained(pretrained_model_name_or_path)
-    else:
+    if model_name_or_checkpoint_path is None or model_name_or_checkpoint_path.endswith(".pt"):
+        # Training from scratch or using local checkpoint
         config = ModelArgs(
             backbone_flavor="llama-1B",
             decoder_flavor="llama-100M",
@@ -179,14 +176,18 @@ def load_model(
             audio_num_codebooks=AUDIO_NUM_CODEBOOKS
         )
         model = Model(config)
-        model = init_weights(model)
+
+        if model_name_or_checkpoint_path:
+            state_dict = torch.load(model_name_or_checkpoint_path)['model']
+            model.load_state_dict(state_dict)
+        else:
+            model = init_weights(model)
+    else: 
+        # Huggingface model name or local path
+        model = Model.from_pretrained(model_name_or_checkpoint_path)
 
     model.decoder_loss_weight = decoder_loss_weight
     model.forward = types.MethodType(forward, model)  # add the forward method to the model
-
-    if checkpoint_path:
-        state_dict = torch.load(checkpoint_path)['model']
-        model.load_state_dict(state_dict)
 
     model = model.to(device=device, dtype=torch.bfloat16)
     return model

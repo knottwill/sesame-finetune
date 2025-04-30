@@ -29,7 +29,8 @@ def parse_args(arg_string=None):
     parser.add_argument("--data", default="./data/tokens.pkl", type=str, help="Path to the pre-tokenized data")
     parser.add_argument("--output_dir", type=Path, default="./exp", help="Path to save the model")
     parser.add_argument("--config", type=str, default='./configs/default.yaml', help="Path to the finetuning config")
-    parser.add_argument("--model", type=str, default="sesame/csm-1b", help="Pretrained model name or local path")
+    parser.add_argument("--model_name_or_checkpoint_path", type=str, default="sesame/csm-1b", help="Pretrained model name or path to local checkpoint or huggingface model")
+    parser.add_argument("--train_from_scratch", action="store_true", help="Train from scratch")
 
     parser.add_argument("--wandb_api_key", type=str, required=True)
     parser.add_argument("--wandb_project", type=str, default="csm-finetuning", help="Name of the project")
@@ -55,11 +56,14 @@ def parse_args(arg_string=None):
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     args.gen_sentences = Path(args.gen_sentences) if args.gen_sentences.endswith(".txt") else args.gen_sentences
+
+    if args.train_from_scratch:
+        args.model_name_or_checkpoint_path = None
     
     return args
 
 
-def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_tokens: dict, trial: optuna.Trial = None):
+def train(args: argparse.Namespace, config: dict, device: torch.device, all_tokens: dict, trial: optuna.Trial = None):
     """
     trial is only used when we are sweeping hyperparameters.
     """
@@ -68,7 +72,7 @@ def finetune(args: argparse.Namespace, config: dict, device: torch.device, all_t
     eff_batch_size = config["batch_size"] * config["grad_acc_steps"]
     
     # Load / create: model, tokenizers, dataloaders, optimizer, scheduler, and grad scaler.
-    model = load_model(device=device, pretrained_model_name_or_path=args.model, decoder_loss_weight=config["decoder_loss_weight"])
+    model = load_model(model_name_or_checkpoint_path=args.model_name_or_checkpoint_path, device=device, decoder_loss_weight=config["decoder_loss_weight"])
     text_tokenizer, audio_tokenizer = load_tokenizers(device)
     trainloader, valloader = create_dataloaders(
         all_tokens, 
@@ -223,6 +227,6 @@ if __name__ == "__main__":
         dir=args.output_dir / "wandb",
     )
 
-    final_val_loss = finetune(args, config, device, all_tokens)
+    final_val_loss = train(args, config, device, all_tokens)
 
     wandb.finish()

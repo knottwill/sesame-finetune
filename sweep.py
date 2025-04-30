@@ -1,3 +1,7 @@
+"""
+Sweep training / finetuning hyperparameters.
+"""
+
 import argparse
 import os
 import pickle
@@ -11,7 +15,7 @@ import torch
 import torch.multiprocessing as mp
 import gc
 
-from finetune import finetune
+from train import train
 
 def parse_args(arg_string=None):   
     parser = argparse.ArgumentParser()
@@ -94,7 +98,7 @@ def worker(args, gpu_id, study_name, storage_name, all_tokens):
             reinit=True,
         )
 
-        best_val_loss = finetune(args, config, device, all_tokens, trial)
+        best_val_loss = train(args, config, device, all_tokens, trial)
         wandb.finish()
         
         torch.cuda.empty_cache()
