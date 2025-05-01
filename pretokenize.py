@@ -81,16 +81,30 @@ def append_to_hdf5(file_path, split, audio_tokens_batch, text_tokens_batch, comp
             length_ds[-n + i] = total_len
 
 
+def get_num_existing_samples(file_path, split):
+    """Return the number of existing samples in the HDF5 file for the given split, using the 'length' dataset."""
+    try:
+        with h5py.File(file_path, "r") as f:
+            return f[split]["length"].shape[0]
+    except Exception:
+        return 0
+
+
 def tokenize_and_store(data_path, output_path, split, audio_tokenizer, text_tokenizer, device, save_every=100):
     """
-    Tokenize the dataset and save in HDF5 incrementally.
+    Tokenize the dataset and save in HDF5 incrementally, resuming if interrupted.
     """
     df = load_metadata(data_path)
+    n_existing = get_num_existing_samples(output_path, split)
+    if n_existing:
+        print(f"⏩ Resuming {split}: skipping {n_existing} already processed samples")
+        df = df.iloc[n_existing:]
+    else:
+        print(f"🔄 Processing {split} split: {len(df)} samples")
+
     audio_tokens_batch, text_tokens_batch = [], []
 
-    print(f"🔄 Processing {split} split: {len(df)} samples")
-
-    for i, (_, row) in enumerate(tqdm(df.iterrows(), total=len(df))):
+    for _, row in tqdm(df.iterrows(), total=len(df)):
         # Handle optional timestamps
         if "start" in row and "end" in row:
             sr = torchaudio.info(row["path"]).sample_rate

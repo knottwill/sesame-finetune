@@ -1,72 +1,94 @@
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 from typing import List
 import numpy as np
-
 import torch
+from torch.utils.data import Dataset, DataLoader, Sampler
 from torch.nn.utils.rnn import pad_sequence
+import h5py
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+AUDIO_NUM_CODEBOOKS = int(os.getenv("AUDIO_NUM_CODEBOOKS"))
 
 
-class TokenizedDataset(torch.utils.data.Dataset):
-    """Tokenized Dataset for the CSM model
-
-    Args:
-        audio_tokens: audio token ids (each token is a list of codebook ids)
-        text_tokens: text token ids (each token is a single id)
+class TokenizedDataset(Dataset):
     """
+    HDF5-backed dataset for tokenized audio and text samples.
 
-    def __init__(self, audio_tokens: List[List[List[int]]], text_tokens: List[List[int]]):
-        self.audio_tokens = audio_tokens
-        self.text_tokens = text_tokens
+    Assumes audio is saved as flat vlen int32 arrays (flattened [n_codebooks, seq_len]).
+    """
+    def __init__(self, token_dataset_path: str, split: str):
+        assert token_dataset_path.endswith(".hdf5"), "Token dataset path must end with .hdf5"
+        self.token_dataset_path = token_dataset_path
+        self.split = split
+        self._file = None  # Lazy open in __getitem__
+
+        # Read length once (for __len__)
+        with h5py.File(token_dataset_path, "r") as f:
+            self._length = len(f[f"{split}/audio"])
 
     def __len__(self):
-        return len(self.audio_tokens)
+        return self._length
 
-    def __getitem__(self, index: int):
-        return {"audio": self.audio_tokens[index], "text": self.text_tokens[index]}
+    def __getitem__(self, idx: int):
+        if self._file is None:
+            self._file = h5py.File(self.token_dataset_path, "r")
+
+        flat_audio = self._file[f"{self.split}/audio"][idx]
+        text = self._file[f"{self.split}/text"][idx]
+
+        audio = torch.tensor(flat_audio, dtype=torch.long).view(AUDIO_NUM_CODEBOOKS, -1)
+        text = torch.tensor(text, dtype=torch.long)
+
+        return {"audio": audio, "text": text}
 
 
 def collate_fn(batch: List[dict]):
-    """Collate function for the TokenizedDataset"""
+    """
+    Collate function for tokenized audio and text.
+    Merges variable-length audio/text into a single padded tensor.
+    """
     tokens, tokens_mask = [], []
-    n_codebooks = 32
+
     for item in batch:
-        audio_tokens = torch.tensor(item["audio"]) # [n_codebooks, audio_seq_len]
-        text_tokens = torch.tensor(item["text"])   # [text_seq_len]
+        audio_tokens = item["audio"]  # [n_codebooks, audio_seq_len]
+        text_tokens = item["text"]    # [text_seq_len]
 
-        # add EOS frame
+        # Add EOS frame to audio
         eos_frame = torch.zeros(audio_tokens.size(0), 1)
-        audio_tokens = torch.cat([audio_tokens, eos_frame], dim=1)  # [n_codebooks, audio_seq_len+1]
+        audio_tokens = torch.cat([audio_tokens, eos_frame], dim=1)
 
-        # add extra dimension for text ids
-        audio_frame = torch.zeros(audio_tokens.size(1), n_codebooks + 1).long()  # [audio_seq_len+1, n_codebooks+1]
+        # extra dimension is for text tokens
+        audio_frame = torch.zeros(audio_tokens.size(1), AUDIO_NUM_CODEBOOKS + 1).long()
         audio_frame[:, :-1] = audio_tokens.transpose(0, 1)
-        audio_frame_mask = torch.zeros(audio_tokens.size(1), n_codebooks + 1).bool()  # [audio_seq_len+1, n_codebooks+1]
+        audio_frame_mask = torch.zeros(audio_tokens.size(1), AUDIO_NUM_CODEBOOKS + 1).bool()
         audio_frame_mask[:, :-1] = True
 
-        text_frame = torch.zeros(len(text_tokens), n_codebooks + 1).long()
+        # Format text frame with same shape
+        text_frame = torch.zeros(len(text_tokens), AUDIO_NUM_CODEBOOKS + 1).long()
         text_frame[:, -1] = text_tokens
-        text_frame_mask = torch.zeros(len(text_tokens), n_codebooks + 1).bool()
+        text_frame_mask = torch.zeros(len(text_tokens), AUDIO_NUM_CODEBOOKS + 1).bool()
         text_frame_mask[:, -1] = True
 
+        # Concatenate and collect
         tokens.append(torch.cat([text_frame, audio_frame], dim=0))
         tokens_mask.append(torch.cat([text_frame_mask, audio_frame_mask], dim=0))
 
     tokens = pad_sequence(tokens, batch_first=True)
     tokens_mask = pad_sequence(tokens_mask, batch_first=True, padding_value=False)
 
-    # [batch_size, max_seq_len, n_codebooks+1]
     return tokens, tokens_mask
 
 
-class BucketSampler(torch.utils.data.sampler.Sampler):
-    """Sampler that groups samples of similar lengths to minimize padding in batches."""
-
+class BucketSampler(Sampler):
+    """
+    Groups samples of similar lengths into bins to minimize padding.
+    """
     def __init__(
-        self, lengths: List[int], batch_size: int, shuffle: bool = True, is_infinite: bool = True, random_seed: int = 42
+        self, lengths: List[int], batch_size: int, shuffle: bool = True,
+        is_infinite: bool = True, random_seed: int = 42
     ):
-        """
-        lengths:      List of sequence lengths for each sample
-        is_infinite:  Whether to repeat the dataset infinitely
-        """
         self.shuffle = shuffle
         self.batch_size = batch_size
         self.is_infinite = is_infinite
@@ -75,18 +97,14 @@ class BucketSampler(torch.utils.data.sampler.Sampler):
         self.bins = self._create_bins(lengths, batch_size)
 
     def _create_bins(self, lengths: List[int], batch_size: int) -> List[List[int]]:
-        """Group samples of similar lengths into bins"""
-        indices_with_lengths = [(i, length) for i, length in enumerate(lengths)]
-        indices_with_lengths.sort(key=lambda x: x[1])
+        indices_with_lengths = sorted(enumerate(lengths), key=lambda x: x[1])
+        bins, current_bin = [], []
 
-        # Group into bins
-        bins = []
-        current_bin = []
-        for idx, length in indices_with_lengths:
+        for idx, _ in indices_with_lengths:
+            current_bin.append(idx)
             if len(current_bin) >= batch_size:
                 bins.append(current_bin)
                 current_bin = []
-            current_bin.append(idx)
 
         if current_bin:
             bins.append(current_bin)
@@ -94,66 +112,65 @@ class BucketSampler(torch.utils.data.sampler.Sampler):
         return bins
 
     def _shuffle_bins(self, epoch: int):
-        """
-        epoch: Current epoch number for deterministic shuffling
-        """
         rng = np.random.RandomState(epoch + self.random_seed)
-        rng.shuffle(self.bins)  # shuffle bins
-        for i in range(len(self.bins)):  # shuffle samples in each bin
-            self.bins[i] = [self.bins[i][j] for j in rng.permutation(len(self.bins[i]))]
+        rng.shuffle(self.bins)
+        for bin_ in self.bins:
+            rng.shuffle(bin_)
 
     def __iter__(self):
         epoch = 0
         while True:
             if self.shuffle:
                 self._shuffle_bins(epoch)
-
             for bin_indices in self.bins:
-                self.local_step += 1
                 yield bin_indices
-
+                self.local_step += 1
             if not self.is_infinite:
                 break
-
             epoch += 1
 
     def __len__(self):
         return len(self.bins)
 
 
-def create_dataloaders(all_tokens: dict, batch_size: int, infinite_train: bool = False):
-    """Create dataloaders for the CSM model
+def load_lengths(token_dataset_path: str, split: str) -> List[int]:
+    with h5py.File(token_dataset_path, "r") as f:
+        return list(f[f"{split}/length"][:])
 
-    all_tokens = {
-        "audio_tokens_train": audio_tokens_train,
-        "text_tokens_train": text_tokens_train,
-        "audio_tokens_val": audio_tokens_val,
-        "text_tokens_val": text_tokens_val,
-    }
+
+def create_dataloaders(
+    token_dataset_path: str,
+    batch_size: int,
+    infinite_train: bool = False,
+    num_workers: int = 0,
+):
     """
-    trainset = TokenizedDataset(all_tokens["audio_tokens_train"], all_tokens["text_tokens_train"])
-    valset = TokenizedDataset(all_tokens["audio_tokens_val"], all_tokens["text_tokens_val"])
+    Creates training and validation dataloaders from an HDF5 file.
+    """
+    train_lengths = load_lengths(token_dataset_path, "train")
+    val_lengths = load_lengths(token_dataset_path, "val")
+
+    trainset = TokenizedDataset(token_dataset_path, split="train")
+    valset = TokenizedDataset(token_dataset_path, split="val")
 
     trainsampler = BucketSampler(
-        lengths=[len(tokens) for tokens in all_tokens["audio_tokens_train"]],
-        batch_size=batch_size,
-        is_infinite=infinite_train,
-        shuffle=True,
+        lengths=train_lengths, batch_size=batch_size,
+        is_infinite=infinite_train, shuffle=True
     )
 
     valsampler = BucketSampler(
-        lengths=[len(tokens) for tokens in all_tokens["audio_tokens_val"]],
-        batch_size=batch_size,
-        is_infinite=False,
-        shuffle=False,
+        lengths=val_lengths, batch_size=batch_size,
+        is_infinite=False, shuffle=False
     )
 
-    trainloader = torch.utils.data.DataLoader(
-        trainset, batch_sampler=trainsampler, num_workers=0, collate_fn=collate_fn, pin_memory=True
+    trainloader = DataLoader(
+        trainset, batch_sampler=trainsampler,
+        collate_fn=collate_fn, num_workers=num_workers, pin_memory=True
     )
 
-    valloader = torch.utils.data.DataLoader(
-        valset, batch_sampler=valsampler, num_workers=0, collate_fn=collate_fn, pin_memory=True
+    valloader = DataLoader(
+        valset, batch_sampler=valsampler,
+        collate_fn=collate_fn, num_workers=num_workers, pin_memory=True
     )
 
     return trainloader, valloader

@@ -28,7 +28,7 @@ if os.getenv("WANDB_API_KEY") is None:
 
 def parse_args(arg_string=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", default="./data/tokens.pkl", type=str, help="Path to the pre-tokenized data")
+    parser.add_argument("--data", default="./data/tokens.hdf5", type=str, help="Path to the pre-tokenized data")
     parser.add_argument("--output_dir", type=Path, default="./exp", help="Path to save the model")
     parser.add_argument("--config", type=str, default='./configs/finetune_param_defaults.yaml', help="Path to the finetuning config")
     parser.add_argument("--model_name_or_checkpoint_path", type=str, default="sesame/csm-1b", help="Pretrained model name or path to local checkpoint or huggingface model")
@@ -64,7 +64,7 @@ def parse_args(arg_string=None):
     return args
 
 
-def train(args: argparse.Namespace, config: dict, device: torch.device, all_tokens: dict, trial: optuna.Trial = None):
+def train(args: argparse.Namespace, config: dict, device: torch.device, trial: optuna.Trial = None):
     """
     trial is only used when we are sweeping hyperparameters.
     """
@@ -77,7 +77,7 @@ def train(args: argparse.Namespace, config: dict, device: torch.device, all_toke
     text_tokenizer, audio_tokenizer = load_tokenizers(device)
     watermarker = load_watermarker(device=device)
     trainloader, valloader = create_dataloaders(
-        all_tokens, 
+        args.data, 
         config["batch_size"], 
         infinite_train=False,
     )
@@ -223,6 +223,6 @@ if __name__ == "__main__":
         dir=args.output_dir / "wandb",
     )
 
-    final_val_loss = train(args, config, device, all_tokens)
+    final_val_loss = train(args, config, device)
 
     wandb.finish()

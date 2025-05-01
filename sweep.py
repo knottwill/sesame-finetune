@@ -55,7 +55,7 @@ def parse_args(arg_string=None):
     return args
 
 
-def worker(args, gpu_id, study_name, storage_name, all_tokens):
+def worker(args, gpu_id, study_name, storage_name):
     """
     Worker function for each GPU to run multiple trials.
     """
@@ -102,7 +102,7 @@ def worker(args, gpu_id, study_name, storage_name, all_tokens):
             reinit=True,
         )
 
-        best_val_loss = train(args, config, device, all_tokens, trial)
+        best_val_loss = train(args, config, device, trial)
         wandb.finish()
         
         torch.cuda.empty_cache()
@@ -163,7 +163,7 @@ if __name__ == "__main__":
         gpu_id = i % args.n_gpus
         p = mp.Process(
             target=worker,
-            args=(args, gpu_id, args.study_name, storage_name, all_tokens)
+            args=(args, gpu_id, args.study_name, storage_name)
         )
         p.start()
         processes.append(p)
