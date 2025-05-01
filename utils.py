@@ -14,6 +14,7 @@ from torch import nn
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 CSM_REPO_PATH = os.getenv("CSM_REPO_PATH")
+WANDB_API_KEY = os.getenv("WANDB_API_KEY")
 if CSM_REPO_PATH:
     sys.path.append(CSM_REPO_PATH)
     from generator import Generator, load_llama3_tokenizer, load_watermarker

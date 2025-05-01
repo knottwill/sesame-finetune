@@ -19,8 +19,7 @@ import gc
 from train import train
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
-WANDB_API_KEY = os.getenv("WANDB_API_KEY")
-if WANDB_API_KEY is None:
+if os.getenv("WANDB_API_KEY") is None:
     raise ValueError("WANDB_API_KEY is not set in the .env file")
 
 def parse_args(arg_string=None):   

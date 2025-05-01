@@ -18,14 +18,11 @@ from utils import (
     WarmupDecayLR,
     validate,
     load_watermarker,
-    MIMI_SAMPLE_RATE
+    MIMI_SAMPLE_RATE,
 )
 from dataloaders import create_dataloaders
 
-
-load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
-WANDB_API_KEY = os.getenv("WANDB_API_KEY")
-if WANDB_API_KEY is None:
+if os.getenv("WANDB_API_KEY") is None:
     raise ValueError("WANDB_API_KEY is not set in the .env file")
 
 
