@@ -16,6 +16,7 @@ from utils import (
     generate_audio, 
     WarmupDecayLR,
     validate,
+    load_watermarker,
     MIMI_SAMPLE_RATE
 )
 from dataloaders import create_dataloaders
@@ -34,10 +35,10 @@ def parse_args(arg_string=None):
     parser.add_argument("--wandb_name", type=str, default=None, help="Name of the run")
     parser.add_argument("--wandb_reinit", type=bool, default=True, help="Whether to reinitialize the run")
 
-    parser.add_argument("--log_every", type=int, default=10)
-    parser.add_argument("--val_every", type=int, default=100)
-    parser.add_argument("--save_every", type=int, default=1000)
-    parser.add_argument("--gen_every", type=int, default=1000)
+    parser.add_argument("--log_every", type=int, default=10, help="Log every n steps")
+    parser.add_argument("--val_every", type=int, default=100, help="Validate every n steps")
+    parser.add_argument("--save_every", type=int, default=1000, help="Save checkpoint every n steps")
+    parser.add_argument("--gen_every", type=int, default=1000, help="Generate every n steps")
     parser.add_argument(
         "--gen_sentences",
         type=str,
@@ -71,6 +72,7 @@ def train(args: argparse.Namespace, config: dict, device: torch.device, all_toke
     # Load / create: model, tokenizers, dataloaders, optimizer, scheduler, and grad scaler.
     model = load_model(model_name_or_checkpoint_path=args.model_name_or_checkpoint_path, device=device, decoder_loss_weight=config["decoder_loss_weight"])
     text_tokenizer, audio_tokenizer = load_tokenizers(device)
+    watermarker = load_watermarker(device=device)
     trainloader, valloader = create_dataloaders(
         all_tokens, 
         config["batch_size"], 
@@ -92,7 +94,6 @@ def train(args: argparse.Namespace, config: dict, device: torch.device, all_toke
         "scaler": scaler.state_dict(),
         "effective_batch_size": eff_batch_size,
         "config": config,
-        "all_tokens": all_tokens,
         "args": args,
         "best_val_loss": float("inf"),
     }
@@ -107,7 +108,7 @@ def train(args: argparse.Namespace, config: dict, device: torch.device, all_toke
         for tokens, tokens_mask in trainloader:
             tokens, tokens_mask = tokens.to(device), tokens_mask.to(device)
                 
-            with autocast(device_type=str(device), dtype=torch.bfloat16, enabled=args.use_amp):
+            with autocast(device_type=str(device), enabled=args.use_amp):
                 loss = model(tokens, tokens_mask)
                 loss = loss / config["grad_acc_steps"]
             
@@ -165,7 +166,8 @@ def train(args: argparse.Namespace, config: dict, device: torch.device, all_toke
                     {"train_loss": f"{train_loss:.4f}", "learning_rate": optimizer.param_groups[0]["lr"], "epoch": epoch}
                 )
             
-            if args.gen_every and step % args.gen_every == 0:
+            if args.gen_every and step % args.gen_every == 0 and not (args.train_from_scratch and step == 0):
+
                 gen_sentences = []
                 if isinstance(args.gen_sentences, str):
                     gen_sentences.append(args.gen_sentences)
@@ -178,22 +180,17 @@ def train(args: argparse.Namespace, config: dict, device: torch.device, all_toke
                         model,
                         audio_tokenizer,
                         text_tokenizer,
+                        watermarker,
                         sentence,
                         args.gen_speaker,
                         device,
                         use_amp=args.use_amp
                     )
                     
-                    wandb.log(
-                        {
-                            f"audio_{i}": wandb.Audio(audio, sample_rate=MIMI_SAMPLE_RATE),
-                        },
-                        step=step,
-                    )
+                    wandb.log({f"audio_{i}": wandb.Audio(audio, sample_rate=MIMI_SAMPLE_RATE)}, step=step)
                 model.train()
             
             pbar.update(1)
-            
             if step >= total_steps:
                 break
             

@@ -1,7 +1,6 @@
 import os
 import sys
 import types
-import string
 import torch
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
@@ -189,7 +188,7 @@ def load_model(
     model.decoder_loss_weight = decoder_loss_weight
     model.forward = types.MethodType(forward, model)  # add the forward method to the model
 
-    model = model.to(device=device, dtype=torch.bfloat16)
+    model = model.to(device=device)
     return model
 
 
@@ -203,7 +202,7 @@ def reset_caches(model: Model):
             module.kv_cache = None
 
 
-def custom_generator_init(self, model: Model, audio_tokenizer: torch.nn.Module, text_tokenizer):
+def custom_generator_init(self, model: Model, audio_tokenizer: torch.nn.Module, text_tokenizer, watermarker):
     """Custom __init__ for the Generator class (from sesame csm repo)."""
     self._model = model
     self._model.setup_caches(1)
@@ -212,17 +211,17 @@ def custom_generator_init(self, model: Model, audio_tokenizer: torch.nn.Module, 
 
     device = next(model.parameters()).device
     self._audio_tokenizer = audio_tokenizer.to(device=device)
-    self.sample_rate = audio_tokenizer.sample_rate
+    self.sample_rate = MIMI_SAMPLE_RATE
     self.device = device
 
-    self._watermarker = load_watermarker(device=device)
+    self._watermarker = watermarker
 
 
-def generate_audio(model, audio_tokenizer, text_tokenizer, text, speaker_id, device, use_amp=True, max_audio_length_ms=10_000):
+def generate_audio(model, audio_tokenizer, text_tokenizer, watermarker, text, speaker_id, device, use_amp=True, max_audio_length_ms=10_000):
     """Generate audio from text."""
     model.eval()
     Generator.__init__ = types.MethodType(custom_generator_init, Generator)
-    generator = Generator(model, audio_tokenizer, text_tokenizer)
+    generator = Generator(model, audio_tokenizer, text_tokenizer, watermarker)
     
     with torch.no_grad(), torch.amp.autocast(device_type=str(device), enabled=use_amp):
         audio = generator.generate(
