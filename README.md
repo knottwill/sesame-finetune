@@ -6,10 +6,10 @@
 
 # Training and finetuning of Sesame AI's Conversational Speech Model.
 
-Use this repository to finetune Sesame's CSM-1B into new languages or voices, or train it from scratch. [Read blog post here.](https://blog.speechmatics.com/sesame-finetune)
+Use this repository to finetune Sesame's CSM-1B into new languages or voices, or train it from scratch. [Read blog post here](https://blog.speechmatics.com/sesame-finetune).
 
 **Features**:
-- Efficient training via: pre-tokenization, compute amortization, and padding-minimized batching. Supports both partial and full loading of data. 
+- Efficient training via: pre-tokenization, compute amortization, padding-minimized batching. Supports both partial and full loading of data (only use partial loading for large datasets that cannot fit in memory).
 - Finetune by modifying the original weights (as opposed to LoRA). This has a higher compute burden but is much better for significant domain shifts like new languages.
 - Hyperparameter optimization using Optuna. 
 - Performance enhancements: Gradient clipping, accumulation, mixed precision training, advanced LR scheduling, experiment tracking.
@@ -81,10 +81,12 @@ python pretokenize.py --train_data /path/to/train/metadata.json --val_data /path
 To finetune the model, you will need to provide the pre-tokenized data, a finetuning hyperparameters config file, a Weights & Biases API key to track the experiment, the number of epochs to train for, and what sentence to use for generations. The script will generate every `--gen_every` steps, and log the resulting audio to Weights & Biases. 
 
 ```bash
-python train.py --data /path/to/tokenized/data.hdf5 --config ./configs/default.yaml --n_epochs 25 --gen_every 500 --gen_sentence "Marie aime les pommes et les poires."
+python train.py --data /path/to/tokenized/data.hdf5 --config ./configs/finetune_param_defaults.yaml --n_epochs 25 --gen_every 500 --gen_sentence "Marie aime les pommes et les poires."
 ```
 
-If you want to train from scratch, add `--train_from_scratch`. 
+If you want to train from randomly initialized weights, use `--train_from_scratch`. 
+
+If your dataset is too large to fit in memory, use `--partial_data_loading`.
 
 **(Optional) Hyperparameter sweep**
 
