@@ -17,30 +17,38 @@ class TokenizedDataset(Dataset):
     HDF5-backed dataset for tokenized audio and text samples.
 
     Assumes audio is saved as flat vlen int32 arrays (flattened [n_codebooks, seq_len]).
+    Optionally loads the entire split into memory for faster access.
     """
-    def __init__(self, token_dataset_path: str, split: str):
+    def __init__(self, token_dataset_path: str, split: str, load_in_memory: bool = False):
         assert token_dataset_path.endswith(".hdf5"), "Token dataset path must end with .hdf5"
         self.token_dataset_path = token_dataset_path
         self.split = split
         self._file = None  # Lazy open in __getitem__
+        self._in_memory = load_in_memory
+        self._audio = None
+        self._text = None
 
         # Read length once (for __len__)
         with h5py.File(token_dataset_path, "r") as f:
             self._length = len(f[f"{split}/audio"])
+            if self._in_memory:
+                self._audio = [torch.tensor(a, dtype=torch.long) for a in f[f"{split}/audio"][:]]
+                self._text = [torch.tensor(t, dtype=torch.long) for t in f[f"{split}/text"][:]]
 
     def __len__(self):
         return self._length
 
     def __getitem__(self, idx: int):
-        if self._file is None:
-            self._file = h5py.File(self.token_dataset_path, "r")
+        if self._in_memory:
+            flat_audio = self._audio[idx]
+            text = self._text[idx]
+        else:
+            if self._file is None:
+                self._file = h5py.File(self.token_dataset_path, "r")
+            flat_audio = torch.tensor(self._file[f"{self.split}/audio"][idx], dtype=torch.long)
+            text = torch.tensor(self._file[f"{self.split}/text"][idx], dtype=torch.long)
 
-        flat_audio = self._file[f"{self.split}/audio"][idx]
-        text = self._file[f"{self.split}/text"][idx]
-
-        audio = torch.tensor(flat_audio, dtype=torch.long).view(AUDIO_NUM_CODEBOOKS, -1)
-        text = torch.tensor(text, dtype=torch.long)
-
+        audio = flat_audio.view(AUDIO_NUM_CODEBOOKS, -1)
         return {"audio": audio, "text": text}
 
 
@@ -142,16 +150,18 @@ def create_dataloaders(
     token_dataset_path: str,
     batch_size: int,
     infinite_train: bool = False,
+    load_in_memory: bool = False,
     num_workers: int = 0,
 ):
     """
     Creates training and validation dataloaders from an HDF5 file.
+    Optionally loads the entire dataset into memory for efficiency.
     """
     train_lengths = load_lengths(token_dataset_path, "train")
     val_lengths = load_lengths(token_dataset_path, "val")
 
-    trainset = TokenizedDataset(token_dataset_path, split="train")
-    valset = TokenizedDataset(token_dataset_path, split="val")
+    trainset = TokenizedDataset(token_dataset_path, split="train", load_in_memory=load_in_memory)
+    valset = TokenizedDataset(token_dataset_path, split="val", load_in_memory=load_in_memory)
 
     trainsampler = BucketSampler(
         lengths=train_lengths, batch_size=batch_size,
