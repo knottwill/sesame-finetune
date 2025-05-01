@@ -10,4 +10,5 @@ wandb==0.19.6
 optuna
 pandas
 tqdm 
+h5py
 silentcipher @ git+https://github.com/SesameAILabs/silentcipher@master
