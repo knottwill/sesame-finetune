@@ -5,7 +5,6 @@ Sweep training / finetuning hyperparameters.
 import argparse
 import os
 from dotenv import load_dotenv
-import pickle
 from pathlib import Path
 import yaml
 import optuna
@@ -24,7 +23,7 @@ if os.getenv("WANDB_API_KEY") is None:
 
 def parse_args(arg_string=None):   
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", default="./data/tokens.pkl", type=str, help="Path to the pre-tokenized data")
+    parser.add_argument("--data", default="./data/tokens.hdf5", type=str, help="Path to the pre-tokenized data")
     parser.add_argument("--output_dir", type=Path, default="./sweep", help="Path to save the model")
     parser.add_argument("--model_name_or_checkpoint_path", type=str, default="sesame/csm-1b", help="Pretrained model name or path to local checkpoint or huggingface model")
     parser.add_argument("--sweep_config", type=str, default="./configs/sweep.yaml", help="Path to the sweep config")

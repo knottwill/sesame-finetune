@@ -9,9 +9,9 @@
 Use this repository to finetune Sesame's CSM-1B into new languages or voices, or train it from scratch. [Read blog post here.](https://blog.speechmatics.com/sesame-finetune)
 
 **Features**:
-- Efficient training via: pre-tokenization, compute amortization, and padding-minimized batching.
+- Efficient training via: pre-tokenization, compute amortization, and padding-minimized batching. Supports both partial and full loading of data. 
 - Finetune by modifying the original weights (as opposed to LoRA). This has a higher compute burden but is much better for significant domain shifts like new languages.
-- yperparameter optimization using Optuna. 
+- Hyperparameter optimization using Optuna. 
 - Performance enhancements: Gradient clipping, accumulation, mixed precision training, advanced LR scheduling, experiment tracking.
 
 ## Installation
