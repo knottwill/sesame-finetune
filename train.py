@@ -26,7 +26,7 @@ def parse_args(arg_string=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default="./data/tokens.pkl", type=str, help="Path to the pre-tokenized data")
     parser.add_argument("--output_dir", type=Path, default="./exp", help="Path to save the model")
-    parser.add_argument("--config", type=str, default='./configs/default_finetune.yaml', help="Path to the finetuning config")
+    parser.add_argument("--config", type=str, default='./configs/finetune_param_defaults.yaml', help="Path to the finetuning config")
     parser.add_argument("--model_name_or_checkpoint_path", type=str, default="sesame/csm-1b", help="Pretrained model name or path to local checkpoint or huggingface model")
     parser.add_argument("--train_from_scratch", action="store_true", help="Train from scratch")
 
