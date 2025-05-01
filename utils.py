@@ -1,5 +1,7 @@
 import os
 import sys
+from dotenv import load_dotenv
+from pathlib import Path
 import types
 import torch
 import torch.nn.functional as F
@@ -9,20 +11,22 @@ from pathlib import Path
 from typing import Union
 from torch.optim.lr_scheduler import LambdaLR
 from torch import nn
-try:
-    sys.path.append(os.getenv("CSM_PATH", "~/csm"))
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+CSM_REPO_PATH = os.getenv("CSM_REPO_PATH")
+if CSM_REPO_PATH:
+    sys.path.append(CSM_REPO_PATH)
     from generator import Generator, load_llama3_tokenizer, load_watermarker
     from models import Model, ModelArgs, _create_causal_mask
-except ImportError:
-    raise ImportError("CSM not found. Please set the CSM_PATH environment variable to the path of the CSM repo.")
+else:
+    raise ValueError("CSM_REPO_PATH not set in .env file")
 
-
-MIMI_SAMPLE_RATE = 24_000
-BACKBONE_FLAVOR = "llama-1B"
-DECODER_FLAVOR = "llama-100M"
-TEXT_VOCAB_SIZE = 128256
-AUDIO_VOCAB_SIZE = 2051
-AUDIO_NUM_CODEBOOKS = 32
+MIMI_SAMPLE_RATE = int(os.getenv("MIMI_SAMPLE_RATE", 24_000))
+BACKBONE_FLAVOR = os.getenv("BACKBONE_FLAVOR", "llama-1B")
+DECODER_FLAVOR = os.getenv("DECODER_FLAVOR", "llama-100M")
+TEXT_VOCAB_SIZE = int(os.getenv("TEXT_VOCAB_SIZE", 128256))
+AUDIO_VOCAB_SIZE = int(os.getenv("AUDIO_VOCAB_SIZE", 2051))
+AUDIO_NUM_CODEBOOKS = int(os.getenv("AUDIO_NUM_CODEBOOKS", 32))
 
 
 class WarmupDecayLR(LambdaLR):

@@ -10,5 +10,4 @@ default_old.yaml
 *.wav
 french/
 gen.ipynb
-toy_finetune.py
-toy_sweep.py
+.env

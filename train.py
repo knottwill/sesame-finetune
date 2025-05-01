@@ -1,5 +1,6 @@
 import argparse
 import os
+from dotenv import load_dotenv
 import pickle
 import yaml
 from pathlib import Path
@@ -22,6 +23,12 @@ from utils import (
 from dataloaders import create_dataloaders
 
 
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+WANDB_API_KEY = os.getenv("WANDB_API_KEY")
+if WANDB_API_KEY is None:
+    raise ValueError("WANDB_API_KEY is not set in the .env file")
+
+
 def parse_args(arg_string=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default="./data/tokens.pkl", type=str, help="Path to the pre-tokenized data")
@@ -30,7 +37,6 @@ def parse_args(arg_string=None):
     parser.add_argument("--model_name_or_checkpoint_path", type=str, default="sesame/csm-1b", help="Pretrained model name or path to local checkpoint or huggingface model")
     parser.add_argument("--train_from_scratch", action="store_true", help="Train from scratch")
 
-    parser.add_argument("--wandb_api_key", type=str, required=True)
     parser.add_argument("--wandb_project", type=str, default="csm-finetuning", help="Name of the project")
     parser.add_argument("--wandb_name", type=str, default=None, help="Name of the run")
     parser.add_argument("--wandb_reinit", type=bool, default=True, help="Whether to reinitialize the run")
@@ -202,7 +208,6 @@ def train(args: argparse.Namespace, config: dict, device: torch.device, all_toke
 
 if __name__ == "__main__":
     args = parse_args()
-    os.environ["WANDB_API_KEY"] = args.wandb_api_key
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     

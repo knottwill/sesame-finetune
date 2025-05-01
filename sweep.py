@@ -4,6 +4,7 @@ Sweep training / finetuning hyperparameters.
 
 import argparse
 import os
+from dotenv import load_dotenv
 import pickle
 from pathlib import Path
 import yaml
@@ -17,13 +18,17 @@ import gc
 
 from train import train
 
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+WANDB_API_KEY = os.getenv("WANDB_API_KEY")
+if WANDB_API_KEY is None:
+    raise ValueError("WANDB_API_KEY is not set in the .env file")
+
 def parse_args(arg_string=None):   
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default="./data/tokens.pkl", type=str, help="Path to the pre-tokenized data")
     parser.add_argument("--output_dir", type=Path, default="./sweep", help="Path to save the model")
     parser.add_argument("--model_name_or_checkpoint_path", type=str, default="sesame/csm-1b", help="Pretrained model name or path to local checkpoint or huggingface model")
     parser.add_argument("--sweep_config", type=str, default="./configs/sweep.yaml", help="Path to the sweep config")
-    parser.add_argument("--wandb_api_key", type=str, required=True)
     parser.add_argument("--wandb_project", type=str, default="csm-sweep", help="Name of the project")
     parser.add_argument("--study_name", type=str, default="csm-sweep", help="Name of the study")
     parser.add_argument("--n_epochs", type=int, default=5, help="Number of epochs to train before evaluating")
@@ -137,7 +142,6 @@ if __name__ == "__main__":
     assert torch.cuda.is_available(), "CUDA is not available"
     mp.set_start_method('spawn')
     args = parse_args()
-    os.environ["WANDB_API_KEY"] = args.wandb_api_key
     os.makedirs(args.output_dir, exist_ok=True)
     
     with open(args.data, "rb") as f:
