@@ -33,7 +33,7 @@ def parse_args(arg_string=None):
     parser.add_argument("--config", type=str, default='./configs/finetune_param_defaults.yaml', help="Path to the finetuning config")
     parser.add_argument("--model_name_or_checkpoint_path", type=str, default="sesame/csm-1b", help="Pretrained model name or path to local checkpoint or huggingface model")
     parser.add_argument("--train_from_scratch", action="store_true", help="Train from scratch")
-    parser.add_argument("--load_in_memory", type=bool, default=True, help="Load the entire dataset into memory (efficient for small datasets)")
+    parser.add_argument("--partial_data_loading", action="store_true", help="Use partial data loading (use for large datasets)")
 
     parser.add_argument("--wandb_project", type=str, default="csm-finetuning", help="Name of the project")
     parser.add_argument("--wandb_name", type=str, default=None, help="Name of the run")
@@ -81,7 +81,7 @@ def train(args: argparse.Namespace, config: dict, device: torch.device, trial: o
         args.data, 
         config["batch_size"], 
         infinite_train=False,
-        load_in_memory=args.load_in_memory
+        load_in_memory=not args.partial_data_loading
     )
     total_steps = args.n_epochs * len(trainloader) if args.n_epochs else None
     optimizer = torch.optim.AdamW(
@@ -212,9 +212,6 @@ if __name__ == "__main__":
     
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
-
-    with open(args.data, "rb") as f:
-        all_tokens = pickle.load(f)
 
     wandb.init(
         project=args.wandb_project,

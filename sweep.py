@@ -143,9 +143,6 @@ if __name__ == "__main__":
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
     
-    with open(args.data, "rb") as f:
-        all_tokens = pickle.load(f)
-    
     storage_name = f"sqlite:///{args.output_dir}/optuna.db"
 
     study = optuna.create_study(
