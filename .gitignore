@@ -11,3 +11,4 @@ default_old.yaml
 french/
 gen.ipynb
 .env
+speechmatics.sh

@@ -1,4 +1,4 @@
-batch_size: 8
+batch_size: 32
 grad_acc_steps: 1
 learning_rate: 0.003
 max_grad_norm: 1.3

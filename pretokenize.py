@@ -25,6 +25,7 @@ def parse_args(arg_string=None):
     parser.add_argument("--output", type=Path, default="./data/tokens.hdf5")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--save_every", type=int, default=100, help="Save every N samples")
+    parser.add_argument("--omit_speaker_id", action="store_true", help="Don't prepend text with a speaker id")
     args = parser.parse_args(arg_string.split() if arg_string else None)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     return args
@@ -122,7 +123,7 @@ def tokenize_and_store(data_path, output_path, split, audio_tokenizer, text_toke
         # Tokenize
         audio_tokens = audio_tokenizer.encode(waveform)[0].tolist()  # shape: [n_codebooks, seq_len]
         speaker = row.get("speaker", 999)
-        text = f"[{speaker}]{row['text']}"
+        text = f"[{speaker}]{row['text']}" if not args.omit_speaker_id else row['text']
         text_tokens = text_tokenizer.encode(text)
 
         # Accumulate batch
