@@ -35,6 +35,7 @@ def load_llama3_tokenizer():
     )
     return tokenizer
 
+
 def load_mimi(device: Union[str, torch.device]):
     mimi_weight = hf_hub_download(loaders.DEFAULT_REPO, loaders.MIMI_NAME)
     mimi = loaders.get_mimi(mimi_weight, device=device)
