@@ -12,3 +12,4 @@ french/
 gen.ipynb
 .env
 speechmatics.sh
+multilingual.sh
