@@ -10,7 +10,7 @@ import pandas as pd
 import sqlite3
 import torchaudio
 
-from . import AUDIO_NUM_CODEBOOKS
+from . import AUDIO_NUM_CODEBOOKS, MIMI_SAMPLE_RATE, TEXT_VOCAB_SIZE, AUDIO_VOCAB_SIZE
 
 def load_metadata(data_path: Path | str) -> pd.DataFrame:
     """

@@ -15,9 +15,7 @@ from tokenizers.processors import TemplateProcessing
 from transformers import AutoTokenizer
 
 from . import MIMI_SAMPLE_RATE, TEXT_VOCAB_SIZE, AUDIO_VOCAB_SIZE, AUDIO_NUM_CODEBOOKS
-from .generator import Generator
-from .models import Model, ModelArgs, _create_causal_mask
-from .watermarking import load_watermarker
+from .models import Model, ModelArgs
 
 
 def load_llama3_tokenizer():
@@ -76,7 +74,7 @@ def load_model(
 
         if model_name_or_checkpoint_path:
             state_dict = torch.load(model_name_or_checkpoint_path)['model']
-            model.load_state_dict(state_dict)
+            model.load_state_dict(state_dict, strict=False)
         else:
             model = init_weights(model)
     else: 
@@ -146,24 +144,6 @@ def reset_caches(model: Model):
             module.cache_enabled = False
         if hasattr(module, "kv_cache"):
             module.kv_cache = None
-
-
-def generate_audio(model, audio_tokenizer, text_tokenizer, watermarker, text, speaker_id, device, use_amp=True, max_audio_length_ms=10_000):
-    """Generate audio from text."""
-    model.eval()
-    generator = Generator(model, audio_tokenizer, text_tokenizer, watermarker)
-    
-    with torch.no_grad(), torch.amp.autocast(device_type=str(device), enabled=use_amp):
-        audio = generator.generate(
-            text=text,
-            speaker=speaker_id,
-            context=[],
-            max_audio_length_ms=max_audio_length_ms,
-        )
-        audio = audio.squeeze().cpu().numpy()
-    
-    reset_caches(model)
-    return audio
 
 
 def validate(model, valloader, device, use_amp=True):

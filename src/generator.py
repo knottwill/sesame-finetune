@@ -20,12 +20,14 @@ import numpy as np
 import torch
 import torchaudio
 from huggingface_hub import hf_hub_download
-from models import Model, ModelArgs
+
 from moshi.models import loaders
 from tokenizers.processors import TemplateProcessing
 from transformers import AutoTokenizer
 import logging
 from functools import lru_cache
+from typing import Callable, List, Optional, Tuple
+import numpy as np
 
 import torch
 import torchaudio
@@ -33,7 +35,7 @@ import torchaudio
 from . import MIMI_SAMPLE_RATE, AUDIO_NUM_CODEBOOKS
 from .models import Model
 from .watermarking import CSM_1B_GH_WATERMARK, load_watermarker, watermark
-from .utils import load_llama3_tokenizer, load_mimi, load_model
+from .utils import load_llama3_tokenizer, load_mimi, load_model, reset_caches
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +47,25 @@ class Segment:
     audio: torch.Tensor
 
 
-def load_csm_1b(model_name_or_checkpoint_path: str = "sesame/csm-1b", device: str = "cuda") -> Generator:
+def generate_audio(model, audio_tokenizer, text_tokenizer, watermarker, text, speaker_id, device, use_amp=True, max_audio_length_ms=10_000):
+    """Generate audio from text."""
+    model.eval()
+    generator = Generator(model, audio_tokenizer, text_tokenizer, watermarker)
+    
+    with torch.no_grad(), torch.amp.autocast(device_type=str(device), enabled=use_amp):
+        audio = generator.generate(
+            text=text,
+            speaker=speaker_id,
+            context=[],
+            max_audio_length_ms=max_audio_length_ms,
+        )
+        audio = audio.squeeze().cpu().numpy()
+    
+    reset_caches(model)
+    return audio
+
+
+def load_csm_1b(model_name_or_checkpoint_path: str = "sesame/csm-1b", device: str = "cuda"):
     """
     Load the CSM-1B model with extreme optimizations and warmup.
     """
