@@ -15,7 +15,8 @@ import h5py
 import numpy as np
 from tqdm import tqdm
 
-from utils import load_tokenizers, MIMI_SAMPLE_RATE, AUDIO_NUM_CODEBOOKS
+from src.data import load_metadata, load_audio
+from src.utils import load_tokenizers, AUDIO_NUM_CODEBOOKS
 
 
 def parse_args(arg_string=None):
@@ -29,27 +30,6 @@ def parse_args(arg_string=None):
     args = parser.parse_args(arg_string.split() if arg_string else None)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     return args
-
-
-def load_metadata(data_path: Path | str) -> pd.DataFrame:
-    """
-    Load metadata from various formats.
-    """
-    if isinstance(data_path, str):
-        data_path = Path(data_path)
-
-    if data_path.suffix == ".json":
-        return pd.read_json(data_path)
-    elif data_path.suffix == ".csv":
-        return pd.read_csv(data_path)
-    elif data_path.suffix == ".sql":
-        return pd.read_sql_query("SELECT * FROM data", sqlite3.connect(data_path))
-    elif data_path.suffix == ".parquet":
-        return pd.read_parquet(data_path)
-    elif data_path.suffix == ".pkl":
-        return pd.read_pickle(data_path)
-    else:
-        raise NotImplementedError(f"Unsupported file format: {data_path}")
 
 
 def append_to_hdf5(file_path, split, audio_tokens_batch, text_tokens_batch, compression="gzip"):
@@ -89,22 +69,6 @@ def get_num_existing_samples(file_path, split):
             return f[split]["length"].shape[0]
     except Exception:
         return 0
-    
-
-def load_audio(path: Path | str, start: float | None = None, end: float | None = None) -> torch.Tensor:
-    """Load audio from path, optionally with start and end timestamps."""
-    # Handle optional timestamps
-    if start and end:
-        sr = torchaudio.info(path).sample_rate
-        frame_offset = int(start * sr)
-        num_frames = int((end - start) * sr)
-    else:
-        frame_offset = 0
-        num_frames = -1
-
-    # Load and resample audio
-    waveform, sr = torchaudio.load(path, frame_offset=frame_offset, num_frames=num_frames)
-    return torchaudio.functional.resample(waveform.squeeze(0), orig_freq=sr, new_freq=MIMI_SAMPLE_RATE)
 
 
 def tokenize_and_store(data_path, output_path, split, audio_tokenizer, text_tokenizer, device, save_every=100):

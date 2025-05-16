@@ -1,7 +1,5 @@
 import argparse
 import os
-from dotenv import load_dotenv
-import pickle
 import yaml
 from pathlib import Path
 from tqdm import tqdm
@@ -11,16 +9,16 @@ from torch.amp import GradScaler, autocast
 from torch.nn.utils import clip_grad_norm_
 import wandb
 
-from utils import (
+from src import MIMI_SAMPLE_RATE
+from src.utils import (
     load_model, 
     load_tokenizers, 
     generate_audio, 
     WarmupDecayLR,
     validate,
-    load_watermarker,
-    MIMI_SAMPLE_RATE,
+    load_watermarker
 )
-from dataloaders import create_dataloaders
+from src.data import create_dataloaders
 
 if os.getenv("WANDB_API_KEY") is None:
     raise ValueError("WANDB_API_KEY is not set in the .env file")

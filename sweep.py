@@ -4,7 +4,6 @@ Sweep training / finetuning hyperparameters.
 
 import argparse
 import os
-from dotenv import load_dotenv
 from pathlib import Path
 import yaml
 import optuna
@@ -17,7 +16,6 @@ import gc
 
 from train import train
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 if os.getenv("WANDB_API_KEY") is None:
     raise ValueError("WANDB_API_KEY is not set in the .env file")
 

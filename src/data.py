@@ -1,15 +1,97 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 from typing import List
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader, Sampler
 from torch.nn.utils.rnn import pad_sequence
 import h5py
+import pandas as pd
+import sqlite3
+import torchaudio
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
-AUDIO_NUM_CODEBOOKS = int(os.getenv("AUDIO_NUM_CODEBOOKS"))
+from . import AUDIO_NUM_CODEBOOKS
+
+def load_metadata(data_path: Path | str) -> pd.DataFrame:
+    """
+    Load metadata from various formats.
+    """
+    if isinstance(data_path, str):
+        data_path = Path(data_path)
+
+    if data_path.suffix == ".json":
+        return pd.read_json(data_path)
+    elif data_path.suffix == ".csv":
+        return pd.read_csv(data_path)
+    elif data_path.suffix == ".sql":
+        return pd.read_sql_query("SELECT * FROM data", sqlite3.connect(data_path))
+    elif data_path.suffix == ".parquet":
+        return pd.read_parquet(data_path)
+    elif data_path.suffix == ".pkl":
+        return pd.read_pickle(data_path)
+    else:
+        raise NotImplementedError(f"Unsupported file format: {data_path}")
+
+
+def load_audio(path: Path | str, start: float | None = None, end: float | None = None) -> torch.Tensor:
+    """Load audio from path, optionally with start and end timestamps."""
+    # Handle optional timestamps
+    if start and end:
+        sr = torchaudio.info(path).sample_rate
+        frame_offset = int(start * sr)
+        num_frames = int((end - start) * sr)
+    else:
+        frame_offset = 0
+        num_frames = -1
+
+    # Load and resample audio
+    waveform, sr = torchaudio.load(path, frame_offset=frame_offset, num_frames=num_frames)
+    return torchaudio.functional.resample(waveform.squeeze(0), orig_freq=sr, new_freq=MIMI_SAMPLE_RATE)
+
+
+def create_dataloaders(
+    token_dataset_path: str,
+    batch_size: int,
+    infinite_train: bool = False,
+    load_in_memory: bool = False,
+    num_workers: int = 0,
+):
+    """
+    Creates training and validation dataloaders from an HDF5 file.
+    Optionally loads the entire dataset into memory for efficiency.
+    """
+    train_lengths = load_lengths(token_dataset_path, "train")
+    val_lengths = load_lengths(token_dataset_path, "val")
+
+    trainset = TokenizedDataset(token_dataset_path, split="train", load_in_memory=load_in_memory)
+    valset = TokenizedDataset(token_dataset_path, split="val", load_in_memory=load_in_memory)
+
+    trainsampler = BucketSampler(
+        lengths=train_lengths, batch_size=batch_size,
+        is_infinite=infinite_train, shuffle=True
+    )
+
+    valsampler = BucketSampler(
+        lengths=val_lengths, batch_size=batch_size,
+        is_infinite=False, shuffle=False
+    )
+
+    trainloader = DataLoader(
+        trainset, batch_sampler=trainsampler,
+        collate_fn=collate_fn, num_workers=num_workers, pin_memory=True
+    )
+
+    valloader = DataLoader(
+        valset, batch_sampler=valsampler,
+        collate_fn=collate_fn, num_workers=num_workers, pin_memory=True
+    )
+
+    return trainloader, valloader
+
+
+def load_lengths(token_dataset_path: str, split: str) -> List[int]:
+    with h5py.File(token_dataset_path, "r") as f:
+        return list(f[f"{split}/length"][:])
 
 
 class TokenizedDataset(Dataset):
@@ -139,48 +221,3 @@ class BucketSampler(Sampler):
 
     def __len__(self):
         return len(self.bins)
-
-
-def load_lengths(token_dataset_path: str, split: str) -> List[int]:
-    with h5py.File(token_dataset_path, "r") as f:
-        return list(f[f"{split}/length"][:])
-
-
-def create_dataloaders(
-    token_dataset_path: str,
-    batch_size: int,
-    infinite_train: bool = False,
-    load_in_memory: bool = False,
-    num_workers: int = 0,
-):
-    """
-    Creates training and validation dataloaders from an HDF5 file.
-    Optionally loads the entire dataset into memory for efficiency.
-    """
-    train_lengths = load_lengths(token_dataset_path, "train")
-    val_lengths = load_lengths(token_dataset_path, "val")
-
-    trainset = TokenizedDataset(token_dataset_path, split="train", load_in_memory=load_in_memory)
-    valset = TokenizedDataset(token_dataset_path, split="val", load_in_memory=load_in_memory)
-
-    trainsampler = BucketSampler(
-        lengths=train_lengths, batch_size=batch_size,
-        is_infinite=infinite_train, shuffle=True
-    )
-
-    valsampler = BucketSampler(
-        lengths=val_lengths, batch_size=batch_size,
-        is_infinite=False, shuffle=False
-    )
-
-    trainloader = DataLoader(
-        trainset, batch_sampler=trainsampler,
-        collate_fn=collate_fn, num_workers=num_workers, pin_memory=True
-    )
-
-    valloader = DataLoader(
-        valset, batch_sampler=valsampler,
-        collate_fn=collate_fn, num_workers=num_workers, pin_memory=True
-    )
-
-    return trainloader, valloader
