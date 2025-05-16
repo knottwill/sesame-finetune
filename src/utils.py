@@ -68,7 +68,8 @@ def load_model(
             decoder_flavor="llama-100M",
             text_vocab_size=TEXT_VOCAB_SIZE,
             audio_vocab_size=AUDIO_VOCAB_SIZE,
-            audio_num_codebooks=AUDIO_NUM_CODEBOOKS
+            audio_num_codebooks=AUDIO_NUM_CODEBOOKS,
+            decoder_loss_weight=decoder_loss_weight
         )
         model = Model(config)
 
@@ -80,12 +81,8 @@ def load_model(
     else: 
         # Huggingface model name or local path
         model = Model.from_pretrained(model_name_or_checkpoint_path)
-
-    model.decoder_loss_weight = decoder_loss_weight
-    model.forward = types.MethodType(forward, model)  # add the forward method to the model
-
-    model = model.to(device=device)
-    return model
+        
+    return model.to(device=device)
 
 
 class WarmupDecayLR(LambdaLR):
@@ -153,7 +150,6 @@ def reset_caches(model: Model):
 def generate_audio(model, audio_tokenizer, text_tokenizer, watermarker, text, speaker_id, device, use_amp=True, max_audio_length_ms=10_000):
     """Generate audio from text."""
     model.eval()
-    Generator.__init__ = types.MethodType(custom_generator_init, Generator)
     generator = Generator(model, audio_tokenizer, text_tokenizer, watermarker)
     
     with torch.no_grad(), torch.amp.autocast(device_type=str(device), enabled=use_amp):
