@@ -24,7 +24,7 @@ def load_llama3_tokenizer():
     """
     https://github.com/huggingface/transformers/issues/22794#issuecomment-2092623992
     """
-    tokenizer_name = "meta-llama/Llama-3.2-1B"
+    tokenizer_name = "unsloth/Llama-3.2-1B"
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     bos = tokenizer.bos_token
     eos = tokenizer.eos_token
@@ -33,7 +33,7 @@ def load_llama3_tokenizer():
         pair=f"{bos}:0 $A:0 {eos}:0 {bos}:1 $B:1 {eos}:1",
         special_tokens=[(f"{bos}", tokenizer.bos_token_id), (f"{eos}", tokenizer.eos_token_id)],
     )
-
+    return tokenizer
 
 def load_mimi(device: Union[str, torch.device]):
     mimi_weight = hf_hub_download(loaders.DEFAULT_REPO, loaders.MIMI_NAME)
